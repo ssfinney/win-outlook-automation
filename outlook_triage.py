@@ -49,6 +49,9 @@ MOVE_NOISE_TO_READ_LATER = False
 # - move messages
 DRY_RUN = True
 
+# Guardrail: if True, never modify messages that have non-triage categories.
+PROTECT_NON_TRIAGE_CATEGORIES = True
+
 # Outputs and artifacts
 DATA_DIR = BASE_DIR / "data"
 OUTPUT_DIR = BASE_DIR / "outputs"
@@ -70,6 +73,9 @@ def validate_config() -> None:
 
     if not isinstance(DRY_RUN, bool):
         raise ValueError("DRY_RUN must be a bool")
+
+    if not isinstance(PROTECT_NON_TRIAGE_CATEGORIES, bool):
+        raise ValueError("PROTECT_NON_TRIAGE_CATEGORIES must be a bool")
 
 
 CAT_URGENT = "Urgent"
@@ -145,6 +151,7 @@ class ScoredMail:
     final_bucket: str
     reasons: str
     is_noise_hint: int
+    action_status: str
 
 
 def safe_str(x: Any) -> str:
@@ -388,13 +395,13 @@ def ensure_outlook_folder(namespace, folder_name: str):
         return None
 
 
-def apply_actions(mail_item, final_bucket: str, read_later) -> None:
+def apply_actions(mail_item, final_bucket: str, read_later) -> str:
     if DRY_RUN:
-        return
+        return "dry_run"
 
-    if has_non_triage_categories(mail_item):
+    if PROTECT_NON_TRIAGE_CATEGORIES and has_non_triage_categories(mail_item):
         logger.info(f"Skip actions (manual/non-triage categories present): '{safe_str(mail_item.Subject)}'")
-        return
+        return "skipped_manual_categories"
 
     try:
         existing_cats = safe_str(mail_item.Categories)
@@ -407,13 +414,16 @@ def apply_actions(mail_item, final_bucket: str, read_later) -> None:
         mail_item.Save()
     except Exception as e:
         logger.warning(f"Failed to apply actions to '{safe_str(mail_item.Subject)}': {e}")
-        return
+        return "failed_apply"
 
     if final_bucket == CAT_NOISE and MOVE_NOISE_TO_READ_LATER and read_later is not None:
         try:
             mail_item.Move(read_later)
         except Exception as e:
             logger.warning(f"Failed to move noise email: {e}")
+            return "failed_move_noise"
+
+    return "applied"
 
 
 def collect_items(inbox) -> List:
@@ -497,7 +507,7 @@ def main():
                     logger.error(f"Model prediction error for {entry_id}: {e}")
 
             final_bucket = choose_final_bucket(rule_bucket, model_bucket, rule_score)
-            apply_actions(item, final_bucket, read_later)
+            action_status = apply_actions(item, final_bucket, read_later)
 
             scored.append(
                 ScoredMail(
@@ -521,6 +531,7 @@ def main():
                     final_bucket=str(final_bucket),
                     reasons=str(reasons),
                     is_noise_hint=int(features["is_noise_hint"]),
+                    action_status=action_status,
                 )
             )
             processed += 1

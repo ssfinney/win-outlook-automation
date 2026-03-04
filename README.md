@@ -26,7 +26,10 @@ This project:
   Windows Task Scheduler task to run `outlook_triage.py` on a schedule.
 
 - `TrainModel_Task.xml`  
-  Windows Task Scheduler task to run `train_model.py` (typically weekly or manual).
+  Windows Task Scheduler task to run `train_model.py` (weekly by default + manual run as needed).
+
+- `config/vip_senders.csv`  
+  Optional local starter list for VIP senders.
 
 ---
 
@@ -121,6 +124,23 @@ In Outlook, you should see Categories applied to recent emails and flags on Urge
 
 ---
 
+## Configuration reference
+
+All key tuning knobs are at the top of `outlook_triage.py`:
+
+- `DAYS_BACK` (default `7`) — lookback window for inbox scanning.
+- `MAX_ITEMS` (default `500`) — hard cap on COM iteration size.
+- `MOVE_NOISE_TO_READ_LATER` (default `False`) — whether to auto-move Noise mail.
+- `DRY_RUN` (default `True`) — safe mode: score/report only, no mailbox mutations.
+- `PROTECT_NON_TRIAGE_CATEGORIES` (default `True`) — guardrail that skips emails with any non-triage category.
+
+Recommended rollout:
+1. Keep `DRY_RUN=True` for initial validation.
+2. Keep `MOVE_NOISE_TO_READ_LATER=False` until you confirm your `Read Later` behavior.
+3. When confident, set `DRY_RUN=False`.
+
+---
+
 ## Configure VIPs (high priority senders)
 
 Edit:
@@ -132,6 +152,8 @@ One SMTP address per line, e.g.
 vip1@company.com
 vip2@company.com
 ```
+
+This repo includes a local optional starter file at `config/vip_senders.csv` you can copy into your OneDrive config folder.
 
 VIP senders get a scoring boost (`+50`).
 
@@ -158,8 +180,9 @@ VIP senders get a scoring boost (`+50`).
 Even with a model trained, **rules override the model** when risk is high:
 - Rule `Urgent` always stays `Urgent`
 - Strong `Noise` stays `Noise` when score < 0
+- If `PROTECT_NON_TRIAGE_CATEGORIES=True`, emails already carrying non-triage/manual categories are never modified.
 
-This prevents the model from “down-ranking” critical items.
+This prevents the model from “down-ranking” critical items or clobbering user-managed categories.
 
 ---
 
@@ -172,25 +195,23 @@ This prevents the model from “down-ranking” critical items.
    - `OutlookTriage_Task.xml`
    - `TrainModel_Task.xml`
 4. Edit each task:
-   - Set **User account** to you
-   - Confirm **Triggers** (time of day)
+   - Set **User account** to your Windows user (not SYSTEM)
+   - Select **Run only when user is logged on**
+   - Confirm **Triggers**
    - Update **Actions** paths:
      - Python: `<repo>\.venv\Scripts\python.exe`
      - Script: `<repo>\outlook_triage.py` or `<repo>\train_model.py`
-5. Ensure “Run only when user is logged on” (Outlook COM is usually safest this way)
+5. Keep **MultipleInstancesPolicy = StopExisting** to avoid silent skipped runs from a stuck task.
+
+### Training schedule recommendation
+- Keep `TrainModel` scheduled **weekly**.
+- Also run manual retraining after you add **20–50** new labeled rows.
 
 > Outlook COM automation often fails in non-interactive sessions. If a scheduled run doesn’t work, run it while logged in.
 
 ---
 
 ## Tuning knobs (in `outlook_triage.py`)
-
-Top-level settings:
-- `DAYS_BACK` (default 7)
-- `MAX_ITEMS` (default 500)
-- `MOVE_NOISE_TO_READ_LATER` (default True)
-- `KEYWORD_WEIGHTS` (add your high-value business terms)
-- `NOISE_PATTERNS` (catch newsletters/promos)
 
 Categories/folders:
 - Categories: `Urgent/Action/Waiting/FYI/Noise`
@@ -224,13 +245,6 @@ Categories/folders:
 ### Categories not appearing
 - Outlook Categories exist per mailbox/profile.
 - The script sets `mail_item.Categories = "<Category>"`. If you want color-coded categories, define them in Outlook manually once.
-
----
-
-## Roadmap ideas (optional)
-- Thread-level triage via `ConversationID`
-- “Resurface” logic that pulls older high-scored emails into a daily digest
-- Local keyword + sender model features from subject/body snippets (currently subject + headers + rule features)
 
 ---
 
