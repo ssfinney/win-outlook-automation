@@ -1,0 +1,50 @@
+<?xml version="1.0" encoding="UTF-16"?>
+<Task version="1.4" xmlns="[http://schemas.microsoft.com/windows/2004/02/mit/task](http://schemas.microsoft.com/windows/2004/02/mit/task)">
+<RegistrationInfo>
+<Date>2026-02-20T00:00:00</Date>
+<Author>AI_Outlook</Author>
+<Description>Runs train_model.py to train/update the triage model from labeled Excel reports.</Description>
+</RegistrationInfo>
+<Triggers>
+<CalendarTrigger>
+<StartBoundary>2026-02-20T19:30:00</StartBoundary>
+<Enabled>true</Enabled>
+<ScheduleByDay>
+<DaysInterval>1</DaysInterval>
+</ScheduleByDay>
+</CalendarTrigger>
+</Triggers>
+<Principals>
+<Principal id="Author">
+<UserId>S-1-5-18</UserId>
+<RunLevel>LeastPrivilege</RunLevel>
+</Principal>
+</Principals>
+<Settings>
+<MultipleInstancesPolicy>IgnoreNew</MultipleInstancesPolicy>
+<DisallowStartIfOnBatteries>false</DisallowStartIfOnBatteries>
+<StopIfGoingOnBatteries>false</StopIfGoingOnBatteries>
+<AllowHardTerminate>true</AllowHardTerminate>
+<StartWhenAvailable>true</StartWhenAvailable>
+<RunOnlyIfNetworkAvailable>false</RunOnlyIfNetworkAvailable>
+<IdleSettings>
+<StopOnIdleEnd>false</StopOnIdleEnd>
+<RestartOnIdle>false</RestartOnIdle>
+</IdleSettings>
+<AllowStartOnDemand>true</AllowStartOnDemand>
+<Enabled>true</Enabled>
+<Hidden>false</Hidden>
+<RunOnlyIfIdle>false</RunOnlyIfIdle>
+<WakeToRun>false</WakeToRun>
+<ExecutionTimeLimit>PT30M</ExecutionTimeLimit>
+<Priority>7</Priority>
+</Settings>
+<Actions Context="Author">
+<Exec>
+<!-- EDIT THESE PATHS AFTER IMPORT -->
+<Command>%USERPROFILE%\ai_outlook\.venv\Scripts\python.exe</Command>
+<Arguments>%USERPROFILE%\ai_outlook\train_model.py</Arguments>
+<WorkingDirectory>%USERPROFILE%\ai_outlook</WorkingDirectory>
+</Exec>
+</Actions>
+</Task>
