@@ -12,7 +12,7 @@ from logging.handlers import RotatingFileHandler
 from dataclasses import dataclass
 from datetime import datetime, timedelta
 from pathlib import Path
-from typing import List, Any, Dict, Tuple
+from typing import List, Any, Dict, Tuple, Set
 
 import pandas as pd
 
@@ -111,7 +111,7 @@ NOISE_PATTERNS = [
     r"\bno[- ]reply\b",
 ]
 
-VIP_SENDERS_CSV = CONFIG_DIR / "vip_senders.csv"
+VIP_SENDERS_CSV = Path(os.environ.get("VIP_SENDERS_CSV_PATH", str(CONFIG_DIR / "vip_senders.csv")))
 
 
 def ensure_dirs() -> None:
@@ -168,14 +168,26 @@ def naive_dt(dt_val) -> datetime:
         return dt_val
 
 
-def load_vips() -> set:
-    vips = set()
-    if not VIP_SENDERS_CSV.exists():
-        VIP_SENDERS_CSV.write_text("")
+def load_vips() -> Set[str]:
+    vips: Set[str] = set()
+
+    try:
+        VIP_SENDERS_CSV.parent.mkdir(parents=True, exist_ok=True)
+        if not VIP_SENDERS_CSV.exists():
+            VIP_SENDERS_CSV.write_text("", encoding="utf-8")
+    except Exception as e:
+        logger.warning(f"Could not initialize VIP senders file at {VIP_SENDERS_CSV}: {e}")
+        return vips
+
     for line in VIP_SENDERS_CSV.read_text(encoding="utf-8").splitlines():
         email = line.strip().lower()
-        if email:
+        if not email or email.startswith("#"):
+            continue
+        if re.match(r"^[a-z0-9._%+\-]+@[a-z0-9.\-]+\.[a-z]{2,}$", email):
             vips.add(email)
+        else:
+            logger.warning(f"Ignoring invalid VIP sender entry: '{line.strip()}'")
+
     return vips
 
 

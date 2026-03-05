@@ -1,3 +1,4 @@
 # Optional: one SMTP address per line (lowercase recommended)
+# This file is a template only. Keep your real vip_senders.csv local and out of git.
 # Example:
 # vip.person@company.com

@@ -28,8 +28,8 @@ This project:
 - `TrainModel_Task.xml`  
   Windows Task Scheduler task to run `train_model.py` (weekly by default + manual run as needed).
 
-- `config/vip_senders.csv`  
-  Optional local starter list for VIP senders.
+- `config/vip_senders.example.csv`  
+  Template only (copy locally to create your private VIP sender list).
 
 ---
 
@@ -153,9 +153,15 @@ vip1@company.com
 vip2@company.com
 ```
 
-This repo includes a local optional starter file at `config/vip_senders.csv` you can copy into your OneDrive config folder.
+This repo includes a local template at `config/vip_senders.example.csv`; copy it to `%OneDrive%\AI_Outlook\config\vip_senders.csv` on your machine.
 
 VIP senders get a scoring boost (`+50`).
+
+### VIP sender list privacy
+- The VIP sender list is usually **not a secret credential**, but it can contain sensitive personal/business contacts (PII).
+- Keep real lists local (for example `%OneDrive%\AI_Outlook\config\vip_senders.csv`) and out of Git.
+- This repository intentionally tracks only `config/vip_senders.example.csv` and ignores real local VIP CSV files via `.gitignore`.
+- Optional: set `VIP_SENDERS_CSV_PATH` to point to a different local file location if required by policy.
 
 ---
 
