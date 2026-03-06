@@ -205,3 +205,7 @@ cython_debug/
 marimo/_static/
 marimo/_lsp/
 __marimo__/
+
+# Local VIP sender lists (PII-sensitive)
+config/vip_senders.csv
+config/vip_senders.local.csv
