@@ -1,0 +1,20 @@
+name: spit-the-diff
+
+on:
+  pull_request:
+    types: [opened, synchronize, reopened]
+
+jobs:
+  rap-summary:
+    runs-on: ubuntu-latest
+    permissions:
+      pull-requests: write
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Generate PR summary
+        uses: ssfinney/spit-the-diff@v1
+        with:
+          format: rap
+          openai_api_key: ${{ secrets.OPENAI_API_KEY }}
