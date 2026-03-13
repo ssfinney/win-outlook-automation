@@ -26,6 +26,9 @@ MODEL_DIR = BASE_DIR / "model"
 MODEL_PATH = MODEL_DIR / "triage_model.joblib"
 LOG_FILE = DATA_DIR / "train_model.log"
 
+# Ensure DATA_DIR exists before the log handler tries to open LOG_FILE.
+DATA_DIR.mkdir(parents=True, exist_ok=True)
+
 logger = logging.getLogger("train_model")
 logger.setLevel(logging.INFO)
 _handler = RotatingFileHandler(LOG_FILE, maxBytes=2_000_000, backupCount=3, encoding="utf-8")
@@ -88,8 +91,12 @@ def load_labeled_rows() -> pd.DataFrame:
 def build_pipeline() -> Pipeline:
     pre = ColumnTransformer(
         transformers=[
-            ("subject_tfidf", TfidfVectorizer(ngram_range=(1, 2), min_df=1), "subject"),
-            ("body_tfidf", TfidfVectorizer(ngram_range=(1, 2), min_df=1, max_features=500), "body_snippet"),
+            # min_df=2 on subject/body filters single-occurrence noise without risking an
+            # empty vocabulary (these fields have repeated tokens across rows).
+            ("subject_tfidf", TfidfVectorizer(ngram_range=(1, 2), min_df=2), "subject"),
+            ("body_tfidf", TfidfVectorizer(ngram_range=(1, 2), min_df=2, max_features=500), "body_snippet"),
+            # sender_email, to_line, cc_line are often mostly-unique across a small dataset;
+            # min_df=1 avoids an empty-vocabulary error that would crash pipe.fit().
             (
                 "sender_tfidf",
                 TfidfVectorizer(

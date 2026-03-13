@@ -18,6 +18,7 @@ import pandas as pd
 
 try:
     import win32com.client
+    import pythoncom
 except ImportError:
     print("ERROR: pywin32 not installed or incompatible. Use Python 3.12 for this project.")
     raise
@@ -59,6 +60,9 @@ CONFIG_DIR = BASE_DIR / "config"
 MODEL_DIR = BASE_DIR / "model"
 MODEL_PATH = MODEL_DIR / "triage_model.joblib"
 LOG_FILE = DATA_DIR / "triage.log"
+
+# Max rows written per bucket tab in the Excel report.
+EXCEL_BUCKET_ROW_LIMIT = 75
 
 
 def validate_config() -> None:
@@ -119,14 +123,15 @@ def ensure_dirs() -> None:
         p.mkdir(parents=True, exist_ok=True)
 
 
-ensure_dirs()
-validate_config()
-
 logger = logging.getLogger("outlook_triage")
-logger.setLevel(logging.INFO)
-_handler = RotatingFileHandler(LOG_FILE, maxBytes=2_000_000, backupCount=3, encoding="utf-8")
-_handler.setFormatter(logging.Formatter("%(asctime)s - %(levelname)s - %(message)s"))
-logger.addHandler(_handler)
+
+
+def _setup_logging() -> None:
+    logger.setLevel(logging.INFO)
+    if not logger.handlers:
+        _handler = RotatingFileHandler(LOG_FILE, maxBytes=2_000_000, backupCount=3, encoding="utf-8")
+        _handler.setFormatter(logging.Formatter("%(asctime)s - %(levelname)s - %(message)s"))
+        logger.addHandler(_handler)
 
 
 @dataclass
@@ -165,7 +170,7 @@ def naive_dt(dt_val) -> datetime:
     try:
         return dt_val.replace(tzinfo=None)
     except (AttributeError, TypeError):
-        return dt_val
+        return datetime.min
 
 
 def load_vips() -> Set[str]:
@@ -388,7 +393,7 @@ def load_model():
 def choose_final_bucket(rule_bucket: str, model_bucket: str, rule_score: int) -> str:
     if rule_bucket == CAT_URGENT:
         return CAT_URGENT
-    if rule_bucket == CAT_NOISE and rule_score < 0:
+    if rule_bucket == CAT_NOISE:
         return CAT_NOISE
     if model_bucket:
         return model_bucket
@@ -439,16 +444,40 @@ def apply_actions(mail_item, final_bucket: str, read_later) -> str:
 
 
 def collect_items(inbox) -> List:
-    """COM-safe enumeration of items. Filtering is applied in Python to avoid locale pitfalls."""
+    """COM-safe enumeration of recent mail items without holding COM objects longer than needed."""
     items = inbox.Items
     items.Sort("[ReceivedTime]", True)
+
+    # Restrict by time first to reduce mailbox traversal work on large inboxes.
+    # Outlook Restrict expects US-style date format for ReceivedTime in many locales.
+    cutoff = datetime.now() - timedelta(days=DAYS_BACK)
+    restrict_succeeded = False
+    restrict_date = cutoff.strftime("%m/%d/%Y %I:%M %p")
+    try:
+        items = items.Restrict(f"[ReceivedTime] >= '{restrict_date}'")
+        restrict_succeeded = True
+    except Exception as e:
+        logger.warning(
+            f"Could not apply ReceivedTime restriction; falling back to full scan "
+            f"with Python-side cutoff enforcement: {e}"
+        )
 
     result = []
     item = items.GetFirst()
     while item is not None and len(result) < MAX_ITEMS:
         try:
             if getattr(item, "Class", None) == 43:
-                result.append(item)
+                # When Restrict failed, enforce the cutoff in Python and stop early
+                # (items are sorted newest-first, so once we pass the window we are done).
+                if not restrict_succeeded:
+                    received = naive_dt(getattr(item, "ReceivedTime", None))
+                    if received < cutoff:
+                        break
+                # Store stable ID, then re-bind during processing. Holding many COM item objects can
+                # make Outlook sluggish or unstable on large mailboxes.
+                entry_id = safe_str(getattr(item, "EntryID", ""))
+                if entry_id:
+                    result.append(entry_id)
         except Exception:
             pass
         try:
@@ -459,6 +488,10 @@ def collect_items(inbox) -> List:
 
 
 def main():
+    ensure_dirs()
+    validate_config()
+    _setup_logging()
+    pythoncom.CoInitialize()
     logger.info("Starting Outlook Triage scan...")
     vips = load_vips()
     noise_pats = compile_patterns(NOISE_PATTERNS)
@@ -474,22 +507,21 @@ def main():
     inbox = outlook.GetDefaultFolder(6)
     read_later = ensure_outlook_folder(outlook, FOLDER_READ_LATER) if MOVE_NOISE_TO_READ_LATER else None
 
-    cutoff = datetime.now() - timedelta(days=DAYS_BACK)
-
     items_list = collect_items(inbox)
 
     scored: List[ScoredMail] = []
     processed = 0
     skipped = 0
-    out_of_range = 0
     errors = 0
 
-    for item in items_list:
+    if DRY_RUN:
+        logger.warning("DRY_RUN=True: categories/flags/moves are disabled for this run")
+        print("NOTE: DRY_RUN=True, so no categories/flags/moves will be applied.")
+
+    for entry_id in items_list:
         try:
+            item = outlook.GetItemFromID(entry_id)
             received = naive_dt(item.ReceivedTime)
-            if received < cutoff:
-                out_of_range += 1
-                continue
         except Exception:
             errors += 1
             continue
@@ -498,7 +530,6 @@ def main():
             skipped += 1
             continue
 
-        entry_id = safe_str(item.EntryID)
         conv_id = safe_str(getattr(item, "ConversationID", ""))
         sender_name = safe_str(item.SenderName)
         sender_email = get_sender_email(item)
@@ -551,6 +582,8 @@ def main():
             errors += 1
             logger.error(f"Unhandled processing error for {entry_id}: {e}")
             continue
+        finally:
+            item = None
 
     now_tag = datetime.now().strftime("%Y-%m-%d_%H%M")
     report_xlsx = OUTPUT_DIR / f"triage_report_{now_tag}.xlsx"
@@ -572,7 +605,6 @@ def main():
                     "max_items": MAX_ITEMS,
                     "processed": processed,
                     "skipped": skipped,
-                    "out_of_range": out_of_range,
                     "errors": errors,
                     "move_noise_to_read_later": int(MOVE_NOISE_TO_READ_LATER),
                 }
@@ -591,20 +623,21 @@ def main():
             ("FYI", CAT_FYI),
             ("Noise", CAT_NOISE),
         ]:
-            sub = df_out[df_out["final_bucket"] == bucket].head(75) if not df_out.empty else df_out
+            sub = df_out[df_out["final_bucket"] == bucket].head(EXCEL_BUCKET_ROW_LIMIT) if not df_out.empty else df_out
             sub.to_excel(writer, sheet_name=name, index=False)
 
     logger.info(
-        f"Processed={processed} skipped={skipped} out_of_range={out_of_range} errors={errors} "
+        f"Processed={processed} skipped={skipped} errors={errors} "
         f"dry_run={DRY_RUN} days_back={DAYS_BACK} max_items={MAX_ITEMS} report={report_xlsx}"
     )
     print(
-        f"Processed {processed} emails ({skipped} skipped, {out_of_range} out_of_range, {errors} errors) "
+        f"Processed {processed} emails ({skipped} skipped, {errors} errors) "
         f"from the last {DAYS_BACK} days. Dry-run={DRY_RUN}."
     )
 
+    outlook = None
     try:
-        del outlook
+        pythoncom.CoUninitialize()
     except Exception:
         pass
 
