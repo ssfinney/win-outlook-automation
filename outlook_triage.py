@@ -170,6 +170,9 @@ def naive_dt(dt_val) -> datetime:
     try:
         return dt_val.replace(tzinfo=None)
     except (AttributeError, TypeError):
+        # dt_val is not a datetime (e.g. malformed COM return). Return
+        # datetime.min so callers can safely compare against a cutoff;
+        # the item will be treated as out-of-range and skipped.
         return datetime.min
 
 
@@ -293,12 +296,15 @@ def merge_categories(existing_cats: str, add_cat: str) -> str:
     return ", ".join(existing)
 
 
-def rule_score_and_bucket(mail_item, vips: set, noise_pats: List[re.Pattern]) -> Tuple[int, str, str, Dict[str, Any]]:
+def rule_score_and_bucket(
+    mail_item, vips: set, noise_pats: List[re.Pattern], received: datetime = None
+) -> Tuple[int, str, str, Dict[str, Any]]:
     subject = safe_str(mail_item.Subject)
     sender_email = get_sender_email(mail_item)
     to_line = safe_str(mail_item.To)
     cc_line = safe_str(mail_item.CC)
-    received = naive_dt(mail_item.ReceivedTime)
+    if received is None:
+        received = naive_dt(mail_item.ReceivedTime)
 
     reasons: List[str] = []
     score = 0
@@ -514,6 +520,10 @@ def main():
     skipped = 0
     errors = 0
 
+    # Cutoff retained here as a safety net: if collect_items fell back to a full
+    # scan (Restrict failed), this prevents processing emails older than DAYS_BACK.
+    cutoff = datetime.now() - timedelta(days=DAYS_BACK)
+
     if DRY_RUN:
         logger.warning("DRY_RUN=True: categories/flags/moves are disabled for this run")
         print("NOTE: DRY_RUN=True, so no categories/flags/moves will be applied.")
@@ -524,6 +534,9 @@ def main():
             received = naive_dt(item.ReceivedTime)
         except Exception:
             errors += 1
+            continue
+
+        if received < cutoff:
             continue
 
         if already_triaged(item):
@@ -538,7 +551,7 @@ def main():
         cc_line = safe_str(item.CC)
 
         try:
-            rule_score, rule_bucket, reasons, features = rule_score_and_bucket(item, vips, noise_pats)
+            rule_score, rule_bucket, reasons, features = rule_score_and_bucket(item, vips, noise_pats, received)
 
             model_bucket = ""
             if model is not None:
@@ -614,6 +627,13 @@ def main():
 
         df_out = df.copy()
         df_out.insert(0, "label", "")
+        # Sanitize string columns: prepend ' to cells starting with Excel
+        # formula trigger characters so they are not evaluated when opened.
+        _formula_chars = ("=", "+", "-", "@", "|", "%")
+        for col in df_out.select_dtypes(include=["object"]).columns:
+            df_out[col] = df_out[col].apply(
+                lambda v: ("'" + v) if isinstance(v, str) and v and v[0] in _formula_chars else v
+            )
         df_out.to_excel(writer, sheet_name="All Scored", index=False)
 
         for name, bucket in [

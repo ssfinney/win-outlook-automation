@@ -1,0 +1,49 @@
+name: CI
+
+on:
+  # Run after a merge lands on the default branch (post-merge validation).
+  push:
+    branches: [main, master]
+  # Run on every PR targeting the default branch (pre-merge validation).
+  # Feature-branch pushes are covered here; no separate push trigger needed.
+  pull_request:
+    branches: [main, master]
+
+jobs:
+  lint-and-test:
+    name: Lint, Security, Tests
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install \
+            flake8 \
+            bandit \
+            pytest \
+            pandas \
+            openpyxl \
+            scikit-learn \
+            joblib
+
+      # ── Lint ──────────────────────────────────────────────────────────────
+      - name: flake8
+        run: flake8 outlook_triage.py train_model.py --max-line-length=120
+
+      # ── Security scan ─────────────────────────────────────────────────────
+      - name: bandit (medium + high severity only)
+        run: bandit outlook_triage.py train_model.py -ll
+
+      # ── Unit tests ────────────────────────────────────────────────────────
+      - name: pytest
+        run: python -m pytest tests/ -v --tb=short
+        # The conftest.py mocks win32com/pythoncom so tests run on Linux/CI
+        # without a Windows + Outlook environment.
