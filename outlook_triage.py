@@ -537,7 +537,6 @@ def main():
             continue
 
         if received < cutoff:
-            out_of_range += 1
             continue
 
         if already_triaged(item):
