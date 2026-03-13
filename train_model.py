@@ -26,6 +26,9 @@ MODEL_DIR = BASE_DIR / "model"
 MODEL_PATH = MODEL_DIR / "triage_model.joblib"
 LOG_FILE = DATA_DIR / "train_model.log"
 
+# Ensure DATA_DIR exists before the log handler tries to open LOG_FILE.
+DATA_DIR.mkdir(parents=True, exist_ok=True)
+
 logger = logging.getLogger("train_model")
 logger.setLevel(logging.INFO)
 _handler = RotatingFileHandler(LOG_FILE, maxBytes=2_000_000, backupCount=3, encoding="utf-8")
@@ -88,18 +91,18 @@ def load_labeled_rows() -> pd.DataFrame:
 def build_pipeline() -> Pipeline:
     pre = ColumnTransformer(
         transformers=[
-            ("subject_tfidf", TfidfVectorizer(ngram_range=(1, 2), min_df=1), "subject"),
-            ("body_tfidf", TfidfVectorizer(ngram_range=(1, 2), min_df=1, max_features=500), "body_snippet"),
+            ("subject_tfidf", TfidfVectorizer(ngram_range=(1, 2), min_df=2), "subject"),
+            ("body_tfidf", TfidfVectorizer(ngram_range=(1, 2), min_df=2, max_features=500), "body_snippet"),
             (
                 "sender_tfidf",
                 TfidfVectorizer(
                     token_pattern=r"[a-zA-Z0-9_.+-]+@[a-zA-Z0-9-]+\.[a-zA-Z0-9-.]+",
-                    min_df=1,
+                    min_df=2,
                 ),
                 "sender_email",
             ),
-            ("to_tfidf", TfidfVectorizer(ngram_range=(1, 1), min_df=1), "to_line"),
-            ("cc_tfidf", TfidfVectorizer(ngram_range=(1, 1), min_df=1), "cc_line"),
+            ("to_tfidf", TfidfVectorizer(ngram_range=(1, 1), min_df=2), "to_line"),
+            ("cc_tfidf", TfidfVectorizer(ngram_range=(1, 1), min_df=2), "cc_line"),
             (
                 "num",
                 Pipeline(

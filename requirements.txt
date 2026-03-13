@@ -1,0 +1,5 @@
+pywin32>=306
+pandas>=2.0
+openpyxl>=3.1
+scikit-learn>=1.4
+joblib>=1.3

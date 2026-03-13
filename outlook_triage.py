@@ -61,6 +61,9 @@ MODEL_DIR = BASE_DIR / "model"
 MODEL_PATH = MODEL_DIR / "triage_model.joblib"
 LOG_FILE = DATA_DIR / "triage.log"
 
+# Max rows written per bucket tab in the Excel report.
+EXCEL_BUCKET_ROW_LIMIT = 75
+
 
 def validate_config() -> None:
     if not isinstance(DAYS_BACK, int) or DAYS_BACK <= 0 or DAYS_BACK > 90:
@@ -120,14 +123,15 @@ def ensure_dirs() -> None:
         p.mkdir(parents=True, exist_ok=True)
 
 
-ensure_dirs()
-validate_config()
-
 logger = logging.getLogger("outlook_triage")
-logger.setLevel(logging.INFO)
-_handler = RotatingFileHandler(LOG_FILE, maxBytes=2_000_000, backupCount=3, encoding="utf-8")
-_handler.setFormatter(logging.Formatter("%(asctime)s - %(levelname)s - %(message)s"))
-logger.addHandler(_handler)
+
+
+def _setup_logging() -> None:
+    logger.setLevel(logging.INFO)
+    if not logger.handlers:
+        _handler = RotatingFileHandler(LOG_FILE, maxBytes=2_000_000, backupCount=3, encoding="utf-8")
+        _handler.setFormatter(logging.Formatter("%(asctime)s - %(levelname)s - %(message)s"))
+        logger.addHandler(_handler)
 
 
 @dataclass
@@ -166,7 +170,7 @@ def naive_dt(dt_val) -> datetime:
     try:
         return dt_val.replace(tzinfo=None)
     except (AttributeError, TypeError):
-        return dt_val
+        return datetime.min
 
 
 def load_vips() -> Set[str]:
@@ -389,7 +393,7 @@ def load_model():
 def choose_final_bucket(rule_bucket: str, model_bucket: str, rule_score: int) -> str:
     if rule_bucket == CAT_URGENT:
         return CAT_URGENT
-    if rule_bucket == CAT_NOISE and rule_score < 0:
+    if rule_bucket == CAT_NOISE:
         return CAT_NOISE
     if model_bucket:
         return model_bucket
@@ -473,6 +477,9 @@ def collect_items(inbox) -> List:
 
 
 def main():
+    ensure_dirs()
+    validate_config()
+    _setup_logging()
     pythoncom.CoInitialize()
     logger.info("Starting Outlook Triage scan...")
     vips = load_vips()
@@ -494,7 +501,6 @@ def main():
     scored: List[ScoredMail] = []
     processed = 0
     skipped = 0
-    out_of_range = 0
     errors = 0
 
     if DRY_RUN:
@@ -566,10 +572,7 @@ def main():
             logger.error(f"Unhandled processing error for {entry_id}: {e}")
             continue
         finally:
-            try:
-                del item
-            except Exception:
-                pass
+            item = None
 
     now_tag = datetime.now().strftime("%Y-%m-%d_%H%M")
     report_xlsx = OUTPUT_DIR / f"triage_report_{now_tag}.xlsx"
@@ -591,7 +594,6 @@ def main():
                     "max_items": MAX_ITEMS,
                     "processed": processed,
                     "skipped": skipped,
-                    "out_of_range": out_of_range,
                     "errors": errors,
                     "move_noise_to_read_later": int(MOVE_NOISE_TO_READ_LATER),
                 }
@@ -610,27 +612,23 @@ def main():
             ("FYI", CAT_FYI),
             ("Noise", CAT_NOISE),
         ]:
-            sub = df_out[df_out["final_bucket"] == bucket].head(75) if not df_out.empty else df_out
+            sub = df_out[df_out["final_bucket"] == bucket].head(EXCEL_BUCKET_ROW_LIMIT) if not df_out.empty else df_out
             sub.to_excel(writer, sheet_name=name, index=False)
 
     logger.info(
-        f"Processed={processed} skipped={skipped} out_of_range={out_of_range} errors={errors} "
+        f"Processed={processed} skipped={skipped} errors={errors} "
         f"dry_run={DRY_RUN} days_back={DAYS_BACK} max_items={MAX_ITEMS} report={report_xlsx}"
     )
     print(
-        f"Processed {processed} emails ({skipped} skipped, {out_of_range} out_of_range, {errors} errors) "
+        f"Processed {processed} emails ({skipped} skipped, {errors} errors) "
         f"from the last {DAYS_BACK} days. Dry-run={DRY_RUN}."
     )
 
+    outlook = None
     try:
-        del outlook
+        pythoncom.CoUninitialize()
     except Exception:
         pass
-    finally:
-        try:
-            pythoncom.CoUninitialize()
-        except Exception:
-            pass
 
 
 if __name__ == "__main__":
