@@ -293,12 +293,13 @@ def merge_categories(existing_cats: str, add_cat: str) -> str:
     return ", ".join(existing)
 
 
-def rule_score_and_bucket(mail_item, vips: set, noise_pats: List[re.Pattern]) -> Tuple[int, str, str, Dict[str, Any]]:
+def rule_score_and_bucket(mail_item, vips: set, noise_pats: List[re.Pattern], received: datetime = None) -> Tuple[int, str, str, Dict[str, Any]]:
     subject = safe_str(mail_item.Subject)
     sender_email = get_sender_email(mail_item)
     to_line = safe_str(mail_item.To)
     cc_line = safe_str(mail_item.CC)
-    received = naive_dt(mail_item.ReceivedTime)
+    if received is None:
+        received = naive_dt(mail_item.ReceivedTime)
 
     reasons: List[str] = []
     score = 0
@@ -546,7 +547,7 @@ def main():
         cc_line = safe_str(item.CC)
 
         try:
-            rule_score, rule_bucket, reasons, features = rule_score_and_bucket(item, vips, noise_pats)
+            rule_score, rule_bucket, reasons, features = rule_score_and_bucket(item, vips, noise_pats, received)
 
             model_bucket = ""
             if model is not None:
