@@ -173,6 +173,7 @@ def naive_dt(dt_val) -> datetime:
         # dt_val is not a datetime (e.g. malformed COM return). Return
         # datetime.min so callers can safely compare against a cutoff;
         # the item will be treated as out-of-range and skipped.
+        logger.warning("naive_dt: unexpected value %r — treating as datetime.min, item will be skipped", dt_val)
         return datetime.min
 
 
