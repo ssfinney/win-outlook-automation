@@ -451,17 +451,28 @@ def collect_items(inbox) -> List:
     # Restrict by time first to reduce mailbox traversal work on large inboxes.
     # Outlook Restrict expects US-style date format for ReceivedTime in many locales.
     cutoff = datetime.now() - timedelta(days=DAYS_BACK)
+    restrict_succeeded = False
     restrict_date = cutoff.strftime("%m/%d/%Y %I:%M %p")
     try:
         items = items.Restrict(f"[ReceivedTime] >= '{restrict_date}'")
+        restrict_succeeded = True
     except Exception as e:
-        logger.warning(f"Could not apply ReceivedTime restriction; falling back to full scan: {e}")
+        logger.warning(
+            f"Could not apply ReceivedTime restriction; falling back to full scan "
+            f"with Python-side cutoff enforcement: {e}"
+        )
 
     result = []
     item = items.GetFirst()
     while item is not None and len(result) < MAX_ITEMS:
         try:
             if getattr(item, "Class", None) == 43:
+                # When Restrict failed, enforce the cutoff in Python and stop early
+                # (items are sorted newest-first, so once we pass the window we are done).
+                if not restrict_succeeded:
+                    received = naive_dt(getattr(item, "ReceivedTime", None))
+                    if received < cutoff:
+                        break
                 # Store stable ID, then re-bind during processing. Holding many COM item objects can
                 # make Outlook sluggish or unstable on large mailboxes.
                 entry_id = safe_str(getattr(item, "EntryID", ""))

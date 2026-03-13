@@ -91,18 +91,22 @@ def load_labeled_rows() -> pd.DataFrame:
 def build_pipeline() -> Pipeline:
     pre = ColumnTransformer(
         transformers=[
+            # min_df=2 on subject/body filters single-occurrence noise without risking an
+            # empty vocabulary (these fields have repeated tokens across rows).
             ("subject_tfidf", TfidfVectorizer(ngram_range=(1, 2), min_df=2), "subject"),
             ("body_tfidf", TfidfVectorizer(ngram_range=(1, 2), min_df=2, max_features=500), "body_snippet"),
+            # sender_email, to_line, cc_line are often mostly-unique across a small dataset;
+            # min_df=1 avoids an empty-vocabulary error that would crash pipe.fit().
             (
                 "sender_tfidf",
                 TfidfVectorizer(
                     token_pattern=r"[a-zA-Z0-9_.+-]+@[a-zA-Z0-9-]+\.[a-zA-Z0-9-.]+",
-                    min_df=2,
+                    min_df=1,
                 ),
                 "sender_email",
             ),
-            ("to_tfidf", TfidfVectorizer(ngram_range=(1, 1), min_df=2), "to_line"),
-            ("cc_tfidf", TfidfVectorizer(ngram_range=(1, 1), min_df=2), "cc_line"),
+            ("to_tfidf", TfidfVectorizer(ngram_range=(1, 1), min_df=1), "to_line"),
+            ("cc_tfidf", TfidfVectorizer(ngram_range=(1, 1), min_df=1), "cc_line"),
             (
                 "num",
                 Pipeline(
