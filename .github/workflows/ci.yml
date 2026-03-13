@@ -1,10 +1,13 @@
 name: CI
 
 on:
+  # Run after a merge lands on the default branch (post-merge validation).
   push:
-    branches: ["**"]
+    branches: [main, master]
+  # Run on every PR targeting the default branch (pre-merge validation).
+  # Feature-branch pushes are covered here; no separate push trigger needed.
   pull_request:
-    branches: [master, main]
+    branches: [main, master]
 
 jobs:
   lint-and-test:
