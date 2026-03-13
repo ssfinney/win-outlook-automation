@@ -514,6 +514,10 @@ def main():
     skipped = 0
     errors = 0
 
+    # Cutoff retained here as a safety net: if collect_items fell back to a full
+    # scan (Restrict failed), this prevents processing emails older than DAYS_BACK.
+    cutoff = datetime.now() - timedelta(days=DAYS_BACK)
+
     if DRY_RUN:
         logger.warning("DRY_RUN=True: categories/flags/moves are disabled for this run")
         print("NOTE: DRY_RUN=True, so no categories/flags/moves will be applied.")
@@ -524,6 +528,10 @@ def main():
             received = naive_dt(item.ReceivedTime)
         except Exception:
             errors += 1
+            continue
+
+        if received < cutoff:
+            out_of_range += 1
             continue
 
         if already_triaged(item):
