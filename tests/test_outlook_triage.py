@@ -506,16 +506,6 @@ class TestBucketBoundaries:
     def pats(self):
         return ot.compile_patterns([])  # no noise patterns
 
-    def _score_for(self, score_override, pats):
-        """Build a mock item whose scoring will land near score_override."""
-        # Use VIP+to_line to anchor: VIP=50, to=10 = 60 base.
-        # Then use keyword to push into target range.
-        item = _make_mail_item(to_line="me@co.com")
-        vips = {"sender@example.com"}
-        received = datetime.now()
-        _, bucket, _, features = ot.rule_score_and_bucket(item, vips, pats, received)
-        return features["rule_score"], bucket
-
     def test_score_80_is_urgent(self, pats):
         item = _make_mail_item(subject="URGENT RMD deadline today", to_line="me@co.com")
         score, bucket, _, _ = ot.rule_score_and_bucket(item, set(), pats, datetime.now())
