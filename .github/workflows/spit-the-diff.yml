@@ -16,5 +16,5 @@ jobs:
       - name: Generate PR summary
         uses: ssfinney/spit-the-diff@1.1.1
         with:
-          format: rap
+          format: haiku
           openai_api_key: ${{ secrets.OPENAI_API_KEY }}
