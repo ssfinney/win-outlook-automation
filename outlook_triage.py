@@ -18,6 +18,7 @@ import pandas as pd
 
 try:
     import win32com.client
+    import pythoncom
 except ImportError:
     print("ERROR: pywin32 not installed or incompatible. Use Python 3.12 for this project.")
     raise
@@ -439,16 +440,29 @@ def apply_actions(mail_item, final_bucket: str, read_later) -> str:
 
 
 def collect_items(inbox) -> List:
-    """COM-safe enumeration of items. Filtering is applied in Python to avoid locale pitfalls."""
+    """COM-safe enumeration of recent mail items without holding COM objects longer than needed."""
     items = inbox.Items
     items.Sort("[ReceivedTime]", True)
+
+    # Restrict by time first to reduce mailbox traversal work on large inboxes.
+    # Outlook Restrict expects US-style date format for ReceivedTime in many locales.
+    cutoff = datetime.now() - timedelta(days=DAYS_BACK)
+    restrict_date = cutoff.strftime("%m/%d/%Y %I:%M %p")
+    try:
+        items = items.Restrict(f"[ReceivedTime] >= '{restrict_date}'")
+    except Exception as e:
+        logger.warning(f"Could not apply ReceivedTime restriction; falling back to full scan: {e}")
 
     result = []
     item = items.GetFirst()
     while item is not None and len(result) < MAX_ITEMS:
         try:
             if getattr(item, "Class", None) == 43:
-                result.append(item)
+                # Store stable ID, then re-bind during processing. Holding many COM item objects can
+                # make Outlook sluggish or unstable on large mailboxes.
+                entry_id = safe_str(getattr(item, "EntryID", ""))
+                if entry_id:
+                    result.append(entry_id)
         except Exception:
             pass
         try:
@@ -459,6 +473,7 @@ def collect_items(inbox) -> List:
 
 
 def main():
+    pythoncom.CoInitialize()
     logger.info("Starting Outlook Triage scan...")
     vips = load_vips()
     noise_pats = compile_patterns(NOISE_PATTERNS)
@@ -474,8 +489,6 @@ def main():
     inbox = outlook.GetDefaultFolder(6)
     read_later = ensure_outlook_folder(outlook, FOLDER_READ_LATER) if MOVE_NOISE_TO_READ_LATER else None
 
-    cutoff = datetime.now() - timedelta(days=DAYS_BACK)
-
     items_list = collect_items(inbox)
 
     scored: List[ScoredMail] = []
@@ -484,12 +497,14 @@ def main():
     out_of_range = 0
     errors = 0
 
-    for item in items_list:
+    if DRY_RUN:
+        logger.warning("DRY_RUN=True: categories/flags/moves are disabled for this run")
+        print("NOTE: DRY_RUN=True, so no categories/flags/moves will be applied.")
+
+    for entry_id in items_list:
         try:
+            item = outlook.GetItemFromID(entry_id)
             received = naive_dt(item.ReceivedTime)
-            if received < cutoff:
-                out_of_range += 1
-                continue
         except Exception:
             errors += 1
             continue
@@ -498,7 +513,6 @@ def main():
             skipped += 1
             continue
 
-        entry_id = safe_str(item.EntryID)
         conv_id = safe_str(getattr(item, "ConversationID", ""))
         sender_name = safe_str(item.SenderName)
         sender_email = get_sender_email(item)
@@ -551,6 +565,11 @@ def main():
             errors += 1
             logger.error(f"Unhandled processing error for {entry_id}: {e}")
             continue
+        finally:
+            try:
+                del item
+            except Exception:
+                pass
 
     now_tag = datetime.now().strftime("%Y-%m-%d_%H%M")
     report_xlsx = OUTPUT_DIR / f"triage_report_{now_tag}.xlsx"
@@ -607,6 +626,11 @@ def main():
         del outlook
     except Exception:
         pass
+    finally:
+        try:
+            pythoncom.CoUninitialize()
+        except Exception:
+            pass
 
 
 if __name__ == "__main__":
