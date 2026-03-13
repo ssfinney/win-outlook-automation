@@ -248,13 +248,13 @@ class TestChooseFinalBucket:
         for model in ("Noise", "FYI", "Action", ""):
             assert ot.choose_final_bucket("Urgent", model, 100) == "Urgent"
 
-    def test_noise_wins_when_rule_score_negative(self):
+    def test_noise_rule_always_wins(self):
+        # main simplified choose_final_bucket: Noise rule always wins regardless
+        # of score or model — the model cannot override a Noise classification.
         assert ot.choose_final_bucket("Noise", "Urgent", -10) == "Noise"
         assert ot.choose_final_bucket("Noise", "Action", -1) == "Noise"
-
-    def test_noise_does_not_override_when_score_zero(self):
-        # score=0 is not < 0, so model bucket wins
-        assert ot.choose_final_bucket("Noise", "Urgent", 0) == "Urgent"
+        assert ot.choose_final_bucket("Noise", "Urgent", 0) == "Noise"
+        assert ot.choose_final_bucket("Noise", "FYI", 50) == "Noise"
 
     def test_model_overrides_rule_normally(self):
         assert ot.choose_final_bucket("FYI", "Urgent", 10) == "Urgent"
