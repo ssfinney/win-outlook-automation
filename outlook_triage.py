@@ -293,7 +293,9 @@ def merge_categories(existing_cats: str, add_cat: str) -> str:
     return ", ".join(existing)
 
 
-def rule_score_and_bucket(mail_item, vips: set, noise_pats: List[re.Pattern], received: datetime = None) -> Tuple[int, str, str, Dict[str, Any]]:
+def rule_score_and_bucket(
+    mail_item, vips: set, noise_pats: List[re.Pattern], received: datetime = None
+) -> Tuple[int, str, str, Dict[str, Any]]:
     subject = safe_str(mail_item.Subject)
     sender_email = get_sender_email(mail_item)
     to_line = safe_str(mail_item.To)
@@ -623,6 +625,13 @@ def main():
 
         df_out = df.copy()
         df_out.insert(0, "label", "")
+        # Sanitize string columns: prepend ' to cells starting with Excel
+        # formula trigger characters so they are not evaluated when opened.
+        _formula_chars = ("=", "+", "-", "@", "|", "%")
+        for col in df_out.select_dtypes(include=["object"]).columns:
+            df_out[col] = df_out[col].apply(
+                lambda v: ("'" + v) if isinstance(v, str) and v and v[0] in _formula_chars else v
+            )
         df_out.to_excel(writer, sheet_name="All Scored", index=False)
 
         for name, bucket in [

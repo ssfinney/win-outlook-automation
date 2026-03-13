@@ -27,6 +27,8 @@ MODEL_PATH = MODEL_DIR / "triage_model.joblib"
 LOG_FILE = DATA_DIR / "train_model.log"
 
 # Ensure DATA_DIR exists before the log handler tries to open LOG_FILE.
+# (outlook_triage.py creates these dirs when it runs, but train_model.py
+# may be invoked independently.)
 DATA_DIR.mkdir(parents=True, exist_ok=True)
 
 logger = logging.getLogger("train_model")
@@ -100,7 +102,7 @@ def build_pipeline() -> Pipeline:
             (
                 "sender_tfidf",
                 TfidfVectorizer(
-                    token_pattern=r"[a-zA-Z0-9_.+-]+@[a-zA-Z0-9-]+\.[a-zA-Z0-9-.]+",
+                    token_pattern=r"[a-zA-Z0-9_.+-]+@[a-zA-Z0-9-]+\.[a-zA-Z0-9-.]+",  # nosec B106
                     min_df=1,
                 ),
                 "sender_email",
