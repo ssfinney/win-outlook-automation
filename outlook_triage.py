@@ -170,6 +170,9 @@ def naive_dt(dt_val) -> datetime:
     try:
         return dt_val.replace(tzinfo=None)
     except (AttributeError, TypeError):
+        # dt_val is not a datetime (e.g. malformed COM return). Return
+        # datetime.min so callers can safely compare against a cutoff;
+        # the item will be treated as out-of-range and skipped.
         return datetime.min
 
 

@@ -81,12 +81,12 @@ class TestNaiveDt:
         assert result.tzinfo is None
         assert result == datetime(2024, 3, 1, 10, 0, 0)
 
-    def test_non_datetime_returned_as_is(self):
-        # Documents current behaviour: if the value has no replace() method
-        # (AttributeError), naive_dt returns it unchanged. Callers wrap in
-        # try/except so downstream TypeError is caught.
-        assert ot.naive_dt("not a datetime") == "not a datetime"
-        assert ot.naive_dt(None) is None
+    def test_non_datetime_returns_datetime_min(self):
+        # When dt_val has no replace() method (AttributeError/TypeError),
+        # naive_dt must return datetime.min so that comparisons like
+        # `received < cutoff` never raise TypeError outside a try block.
+        assert ot.naive_dt("not a datetime") == datetime.min
+        assert ot.naive_dt(None) == datetime.min
 
 
 # ---------------------------------------------------------------------------
