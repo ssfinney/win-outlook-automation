@@ -51,6 +51,13 @@ NUMERIC_COLS = [
 ]
 ALL_FEATURE_COLS = TEXT_COLS + NUMERIC_COLS
 FORMULA_PREFIX_CHARS = ("=", "+", "-", "@", "|", "%")
+_LABEL_MAP = {
+    "urgent": "Urgent",
+    "action": "Action",
+    "waiting": "Waiting",
+    "fyi": "FYI",
+    "noise": "Noise",
+}
 
 
 def strip_excel_formula_escape(value):
@@ -64,15 +71,7 @@ def strip_excel_formula_escape(value):
 
 def normalize_label(value: str) -> str:
     cleaned = strip_excel_formula_escape(value)
-    normalized = str(cleaned).strip().lower()
-    label_map = {
-        "urgent": "Urgent",
-        "action": "Action",
-        "waiting": "Waiting",
-        "fyi": "FYI",
-        "noise": "Noise",
-    }
-    return label_map.get(normalized, "")
+    return _LABEL_MAP.get(cleaned.strip().lower(), "")
 
 
 def normalize_text_columns(df: pd.DataFrame, text_cols) -> pd.DataFrame:
