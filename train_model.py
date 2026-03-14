@@ -69,9 +69,9 @@ def strip_excel_formula_escape(value):
     return value
 
 
-def normalize_label(value: str) -> str:
+def normalize_label(value) -> str:
     cleaned = strip_excel_formula_escape(value)
-    return _LABEL_MAP.get(cleaned.strip().lower(), "")
+    return _LABEL_MAP.get(str(cleaned).strip().lower(), "")
 
 
 def normalize_text_columns(df: pd.DataFrame, text_cols) -> pd.DataFrame:

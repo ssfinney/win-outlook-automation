@@ -17,6 +17,12 @@ def test_normalize_label_handles_fyi_and_escaped_values():
     assert tm.normalize_label("noise") == "Noise"
 
 
+def test_normalize_label_handles_non_string_values():
+    assert tm.normalize_label(1) == ""
+    assert tm.normalize_label(True) == ""
+    assert tm.normalize_label(None) == ""
+
+
 def test_normalize_text_columns_unescapes_report_export_values():
     df = pd.DataFrame(
         {
