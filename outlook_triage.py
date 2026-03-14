@@ -401,7 +401,7 @@ def choose_final_bucket(rule_bucket: str, model_bucket: str, rule_score: int) ->
         return CAT_URGENT
     if rule_bucket == CAT_NOISE:
         return CAT_NOISE
-    if model_bucket:
+    if model_bucket in TRIAGE_CATEGORIES:
         return model_bucket
     return rule_bucket
 

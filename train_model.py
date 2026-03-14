@@ -50,6 +50,36 @@ NUMERIC_COLS = [
     "is_reply_or_fwd",
 ]
 ALL_FEATURE_COLS = TEXT_COLS + NUMERIC_COLS
+FORMULA_PREFIX_CHARS = ("=", "+", "-", "@", "|", "%")
+_LABEL_MAP = {
+    "urgent": "Urgent",
+    "action": "Action",
+    "waiting": "Waiting",
+    "fyi": "FYI",
+    "noise": "Noise",
+}
+
+
+def strip_excel_formula_escape(value):
+    """Undo report-time Excel escaping for formula-like text cells."""
+    if not isinstance(value, str):
+        return value
+    if len(value) >= 2 and value[0] == "'" and value[1] in FORMULA_PREFIX_CHARS:
+        return value[1:]
+    return value
+
+
+def normalize_label(value) -> str:
+    cleaned = strip_excel_formula_escape(value)
+    return _LABEL_MAP.get(str(cleaned).strip().lower(), "")
+
+
+def normalize_text_columns(df: pd.DataFrame, text_cols) -> pd.DataFrame:
+    for col in text_cols:
+        if col not in df.columns:
+            df[col] = ""
+        df[col] = df[col].fillna("").astype(str).map(strip_excel_formula_escape)
+    return df
 
 
 def load_labeled_rows() -> pd.DataFrame:
@@ -69,7 +99,8 @@ def load_labeled_rows() -> pd.DataFrame:
             continue
 
         df = df.dropna(subset=["label"]).copy()
-        df["label"] = df["label"].astype(str).str.strip().str.title()
+        df["label"] = df["label"].map(normalize_label)
+        df = normalize_text_columns(df, TEXT_COLS)
         df = df[df["label"].isin(LABELS)].copy()
         if df.empty:
             continue
@@ -153,10 +184,7 @@ def main():
         df[col] = pd.to_numeric(df[col], errors="coerce").fillna(default)
 
     # Ensure required text columns exist
-    for col in TEXT_COLS:
-        if col not in df.columns:
-            df[col] = ""
-        df[col] = df[col].fillna("").astype(str)
+    df = normalize_text_columns(df, TEXT_COLS)
 
     X = df[ALL_FEATURE_COLS]
     y = df["label"].astype(str)
