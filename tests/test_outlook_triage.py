@@ -264,6 +264,10 @@ class TestChooseFinalBucket:
         assert ot.choose_final_bucket("Action", "", 50) == "Action"
         assert ot.choose_final_bucket("Waiting", "", 25) == "Waiting"
 
+    def test_fallback_to_rule_when_model_bucket_is_invalid(self):
+        assert ot.choose_final_bucket("Action", "NotACategory", 50) == "Action"
+        assert ot.choose_final_bucket("FYI", "fyi", 10) == "FYI"
+
 
 # ---------------------------------------------------------------------------
 # already_triaged
