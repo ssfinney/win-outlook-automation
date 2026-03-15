@@ -608,6 +608,254 @@ class TestCutoffSafetyNet:
 
 
 # ---------------------------------------------------------------------------
+# get_sender_email
+# ---------------------------------------------------------------------------
+
+
+class TestGetSenderEmail:
+    def test_smtp_address_returned_directly(self):
+        item = _make_mail_item(sender_email="alice@company.com")
+        assert ot.get_sender_email(item) == "alice@company.com"
+
+    def test_smtp_address_normalised_to_lowercase(self):
+        item = _make_mail_item(sender_email="Alice@Company.COM")
+        assert ot.get_sender_email(item) == "alice@company.com"
+
+    def test_exchange_dn_falls_back_to_exchange_user(self):
+        """SenderEmailAddress is an Exchange X.500 DN (no @); resolve via GetExchangeUser."""
+        item = MagicMock()
+        item.SenderEmailAddress = "/O=EXCHANGELABS/CN=RECIPIENTS/CN=ABC123"
+        ex_user = MagicMock()
+        ex_user.PrimarySmtpAddress = "alice@company.com"
+        item.Sender.GetExchangeUser.return_value = ex_user
+        assert ot.get_sender_email(item) == "alice@company.com"
+
+    def test_exchange_user_none_returns_empty(self):
+        item = MagicMock()
+        item.SenderEmailAddress = "/O=EXCHANGELABS/CN=..."
+        item.Sender.GetExchangeUser.return_value = None
+        assert ot.get_sender_email(item) == ""
+
+    def test_com_exception_on_both_paths_returns_empty(self):
+        item = MagicMock()
+        type(item).SenderEmailAddress = PropertyMock(side_effect=Exception("COM error"))
+        item.Sender.GetExchangeUser.side_effect = Exception("COM error")
+        assert ot.get_sender_email(item) == ""
+
+
+# ---------------------------------------------------------------------------
+# validate_config
+# ---------------------------------------------------------------------------
+
+
+class TestValidateConfig:
+    def test_valid_defaults_pass(self):
+        ot.validate_config()  # should not raise
+
+    def test_days_back_zero_raises(self):
+        with patch.object(ot, "DAYS_BACK", 0):
+            with pytest.raises(ValueError, match="DAYS_BACK"):
+                ot.validate_config()
+
+    def test_days_back_over_limit_raises(self):
+        with patch.object(ot, "DAYS_BACK", 91):
+            with pytest.raises(ValueError, match="DAYS_BACK"):
+                ot.validate_config()
+
+    def test_max_items_negative_raises(self):
+        with patch.object(ot, "MAX_ITEMS", -1):
+            with pytest.raises(ValueError, match="MAX_ITEMS"):
+                ot.validate_config()
+
+    def test_dry_run_non_bool_raises(self):
+        with patch.object(ot, "DRY_RUN", "yes"):
+            with pytest.raises(ValueError, match="DRY_RUN"):
+                ot.validate_config()
+
+    def test_move_noise_non_bool_raises(self):
+        with patch.object(ot, "MOVE_NOISE_TO_READ_LATER", 1):
+            with pytest.raises(ValueError, match="MOVE_NOISE_TO_READ_LATER"):
+                ot.validate_config()
+
+
+# ---------------------------------------------------------------------------
+# apply_actions
+# ---------------------------------------------------------------------------
+
+
+class TestApplyActions:
+    def test_dry_run_returns_dry_run_and_does_not_save(self):
+        item = _make_mail_item()
+        with patch.object(ot, "DRY_RUN", True):
+            result = ot.apply_actions(item, ot.CAT_ACTION, None)
+        assert result == "dry_run"
+        item.Save.assert_not_called()
+
+    def test_non_dry_run_applies_category_and_saves(self):
+        item = _make_mail_item()
+        with patch.object(ot, "DRY_RUN", False):
+            result = ot.apply_actions(item, ot.CAT_FYI, None)
+        assert result == "applied"
+        item.Save.assert_called_once()
+
+    def test_urgent_sets_follow_up_flag(self):
+        item = _make_mail_item()
+        with patch.object(ot, "DRY_RUN", False):
+            ot.apply_actions(item, ot.CAT_URGENT, None)
+        assert item.FlagStatus == 2
+        assert item.FlagRequest == "Follow up"
+
+    def test_action_sets_follow_up_flag(self):
+        item = _make_mail_item()
+        with patch.object(ot, "DRY_RUN", False):
+            ot.apply_actions(item, ot.CAT_ACTION, None)
+        assert item.FlagStatus == 2
+
+    def test_fyi_does_not_set_flag(self):
+        item = _make_mail_item()
+        with patch.object(ot, "DRY_RUN", False):
+            ot.apply_actions(item, ot.CAT_FYI, None)
+        assert item.FlagStatus != 2
+
+    def test_manual_category_returns_skipped(self):
+        item = _make_mail_item(categories="MyCustomTag")
+        with patch.object(ot, "DRY_RUN", False):
+            # PROTECT_NON_TRIAGE_CATEGORIES is True by default
+            result = ot.apply_actions(item, ot.CAT_ACTION, None)
+        assert result == "skipped_manual_categories"
+        item.Save.assert_not_called()
+
+    def test_save_exception_returns_failed_apply(self):
+        item = _make_mail_item()
+        item.Save.side_effect = Exception("COM write error")
+        with patch.object(ot, "DRY_RUN", False):
+            result = ot.apply_actions(item, ot.CAT_FYI, None)
+        assert result == "failed_apply"
+
+    def test_moves_noise_to_read_later_folder(self):
+        item = _make_mail_item()
+        read_later = MagicMock()
+        with patch.object(ot, "DRY_RUN", False), \
+                patch.object(ot, "MOVE_NOISE_TO_READ_LATER", True):
+            result = ot.apply_actions(item, ot.CAT_NOISE, read_later)
+        item.Move.assert_called_once_with(read_later)
+        assert result == "applied"
+
+    def test_noise_not_moved_when_read_later_is_none(self):
+        item = _make_mail_item()
+        with patch.object(ot, "DRY_RUN", False), \
+                patch.object(ot, "MOVE_NOISE_TO_READ_LATER", True):
+            result = ot.apply_actions(item, ot.CAT_NOISE, None)
+        item.Move.assert_not_called()
+        assert result == "applied"
+
+
+# ---------------------------------------------------------------------------
+# load_model
+# ---------------------------------------------------------------------------
+
+
+class TestLoadModel:
+    def test_returns_none_when_joblib_unavailable(self):
+        with patch.object(ot, "joblib", None):
+            assert ot.load_model() is None
+
+    def test_returns_none_when_model_file_missing(self, tmp_path):
+        with patch.object(ot, "MODEL_PATH", tmp_path / "nonexistent.joblib"):
+            assert ot.load_model() is None
+
+    def test_returns_model_when_file_exists(self, tmp_path):
+        import joblib
+
+        model_path = tmp_path / "model.joblib"
+        fake_model = {"key": "value"}
+        joblib.dump(fake_model, model_path)
+        with patch.object(ot, "MODEL_PATH", model_path):
+            result = ot.load_model()
+        assert result == fake_model
+
+    def test_returns_none_on_corrupt_model(self, tmp_path):
+        model_path = tmp_path / "model.joblib"
+        model_path.write_bytes(b"this is not a valid joblib file")
+        with patch.object(ot, "MODEL_PATH", model_path):
+            assert ot.load_model() is None
+
+
+# ---------------------------------------------------------------------------
+# ensure_outlook_folder
+# ---------------------------------------------------------------------------
+
+
+class TestEnsureOutlookFolder:
+    def test_returns_existing_folder_by_name(self):
+        namespace = MagicMock()
+        folder1 = MagicMock()
+        folder1.Name = "Read Later"
+        inbox = namespace.GetDefaultFolder.return_value
+        inbox.Folders.__iter__ = MagicMock(return_value=iter([folder1]))
+        result = ot.ensure_outlook_folder(namespace, "Read Later")
+        assert result is folder1
+
+    def test_folder_lookup_is_case_insensitive(self):
+        namespace = MagicMock()
+        folder1 = MagicMock()
+        folder1.Name = "READ LATER"
+        inbox = namespace.GetDefaultFolder.return_value
+        inbox.Folders.__iter__ = MagicMock(return_value=iter([folder1]))
+        result = ot.ensure_outlook_folder(namespace, "read later")
+        assert result is folder1
+
+    def test_creates_folder_when_not_found(self):
+        namespace = MagicMock()
+        inbox = namespace.GetDefaultFolder.return_value
+        # Empty folder list — no match
+        inbox.Folders.__iter__ = MagicMock(return_value=iter([]))
+        new_folder = MagicMock()
+        inbox.Folders.Add.return_value = new_folder
+        result = ot.ensure_outlook_folder(namespace, "New Folder")
+        inbox.Folders.Add.assert_called_once_with("New Folder")
+        assert result is new_folder
+
+    def test_returns_none_on_com_exception(self):
+        namespace = MagicMock()
+        inbox = namespace.GetDefaultFolder.return_value
+        inbox.Folders.__iter__ = MagicMock(side_effect=Exception("COM error"))
+        result = ot.ensure_outlook_folder(namespace, "Read Later")
+        assert result is None
+
+
+# ---------------------------------------------------------------------------
+# Noise edge-case: noise pattern present but score >= 0
+# ---------------------------------------------------------------------------
+
+
+class TestNoiseBucketEdgeCases:
+    @pytest.fixture
+    def pats(self):
+        return ot.compile_patterns(ot.NOISE_PATTERNS)
+
+    def test_noise_pattern_with_positive_score_not_noise_bucket(self, pats):
+        """A noisy email that also matches high-value keywords should NOT become Noise
+        (noise bucket requires score < 0 after the -40 penalty)."""
+        # urgent(40) + rmd(35) + to(10) - noise(-40) = 45 → score >= 0
+        item = _make_mail_item(
+            subject="Urgent RMD newsletter unsubscribe", to_line="me@corp.com"
+        )
+        score, bucket, reasons, _ = ot.rule_score_and_bucket(item, set(), pats, datetime.now())
+        assert "noise_pattern" in reasons
+        assert score >= 0
+        assert bucket != ot.CAT_NOISE
+
+    def test_noise_pattern_with_zero_score_is_noise_bucket(self, pats):
+        """A noisy email with score == -1 (just below zero) must become Noise."""
+        item = _make_mail_item(subject="unsubscribe newsletter", to_line="")
+        score, bucket, reasons, _ = ot.rule_score_and_bucket(item, set(), pats, datetime.now())
+        assert "noise_pattern" in reasons
+        assert score < 0
+        assert bucket == ot.CAT_NOISE
+
+
+# ---------------------------------------------------------------------------
 # thread_depth
 # ---------------------------------------------------------------------------
 
