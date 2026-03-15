@@ -61,6 +61,9 @@ def test_load_labeled_rows_normalizes_label_and_text(monkeypatch):
         def __init__(self, name):
             self.name = name
 
+        def __lt__(self, other):
+            return self.name < other.name
+
     class _FakeOutputDir:
         def glob(self, _pattern):
             return [_FakePath("triage_report_1.xlsx")]
@@ -73,3 +76,74 @@ def test_load_labeled_rows_normalizes_label_and_text(monkeypatch):
     assert list(out["label"]) == ["FYI", "Action"]
     assert out.iloc[0]["subject"] == "=hello"
     assert out.iloc[0]["body_snippet"] == "@body"
+
+
+def test_normalize_label_all_valid_labels():
+    """Every canonical label string round-trips through normalize_label."""
+    for raw in ["urgent", "action", "waiting", "fyi", "noise"]:
+        result = tm.normalize_label(raw)
+        assert result in tm.LABELS, f"Expected a valid label for '{raw}', got '{result}'"
+
+
+def test_build_pipeline_returns_pipeline():
+    from sklearn.pipeline import Pipeline
+
+    pipe = tm.build_pipeline()
+    assert isinstance(pipe, Pipeline)
+    assert "pre" in pipe.named_steps
+    assert "clf" in pipe.named_steps
+
+
+def test_load_labeled_rows_deduplicates_by_entry_id(monkeypatch):
+    """When two reports contain the same entry_id, only the last occurrence is kept."""
+    row_a = pd.DataFrame(
+        {
+            "label": ["action"],
+            "subject": ["first version"],
+            "body_snippet": [""],
+            "sender_email": ["s@x.com"],
+            "to_line": ["t@x.com"],
+            "cc_line": [""],
+            "entry_id": ["dup-id-1"],
+        }
+    )
+    row_b = pd.DataFrame(
+        {
+            "label": ["urgent"],
+            "subject": ["second version"],
+            "body_snippet": [""],
+            "sender_email": ["s@x.com"],
+            "to_line": ["t@x.com"],
+            "cc_line": [""],
+            "entry_id": ["dup-id-1"],
+        }
+    )
+
+    class _FakePath:
+        def __init__(self, name):
+            self.name = name
+
+        def __lt__(self, other):
+            return self.name < other.name
+
+    class _FakeOutputDir:
+        def glob(self, _pattern):
+            return [_FakePath("report_a.xlsx"), _FakePath("report_b.xlsx")]
+
+    call_count = 0
+
+    def _fake_read_excel(*_args, **_kwargs):
+        nonlocal call_count
+        call_count += 1
+        return row_a.copy() if call_count == 1 else row_b.copy()
+
+    monkeypatch.setattr(tm, "OUTPUT_DIR", _FakeOutputDir())
+    monkeypatch.setattr(tm.pd, "read_excel", _fake_read_excel)
+
+    out = tm.load_labeled_rows()
+
+    # Only one row should remain after deduplication
+    assert len(out) == 1
+    # last-seen-wins — row_b's label should win
+    assert out.iloc[0]["label"] == "Urgent"
+    assert out.iloc[0]["subject"] == "second version"

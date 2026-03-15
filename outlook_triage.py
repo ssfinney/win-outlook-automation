@@ -484,7 +484,10 @@ def collect_items(inbox) -> list:
     restrict_succeeded = False
     restrict_date = cutoff.strftime("%m/%d/%Y %I:%M %p")
     try:
-        items = items.Restrict(f"[ReceivedTime] >= '{restrict_date}'")
+        # Outlook Jet filter syntax requires date values wrapped in # delimiters,
+        # not single quotes.  Using # is locale-independent and avoids the
+        # silent Restrict() failure seen on non-US locale machines.
+        items = items.Restrict(f"[ReceivedTime] >= #{restrict_date}#")
         restrict_succeeded = True
     except Exception as e:
         logger.warning(

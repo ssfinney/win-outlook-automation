@@ -35,11 +35,12 @@ DATA_DIR.mkdir(parents=True, exist_ok=True)
 
 logger = logging.getLogger("train_model")
 logger.setLevel(logging.INFO)
-_handler = RotatingFileHandler(
-    LOG_FILE, maxBytes=2_000_000, backupCount=3, encoding="utf-8"
-)
-_handler.setFormatter(logging.Formatter("%(asctime)s - %(levelname)s - %(message)s"))
-logger.addHandler(_handler)
+if not logger.handlers:
+    _handler = RotatingFileHandler(
+        LOG_FILE, maxBytes=2_000_000, backupCount=3, encoding="utf-8"
+    )
+    _handler.setFormatter(logging.Formatter("%(asctime)s - %(levelname)s - %(message)s"))
+    logger.addHandler(_handler)
 
 LABELS = {"Urgent", "Action", "Waiting", "FYI", "Noise"}
 
@@ -162,7 +163,6 @@ def build_pipeline() -> Pipeline:
             ),
         ],
         remainder="drop",
-        sparse_output=True,
     )
 
     clf = LogisticRegression(max_iter=2000, class_weight="balanced")
