@@ -5,9 +5,9 @@ Covers pure helper functions, scoring logic, guardrails, VIP loading,
 bucket thresholds, and the cutoff safety net — without requiring a live
 Outlook / Windows environment.
 """
+
 import pytest
 from datetime import datetime, timedelta
-from pathlib import Path
 from unittest.mock import MagicMock, PropertyMock, patch
 
 import outlook_triage as ot
@@ -16,6 +16,7 @@ import outlook_triage as ot
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
+
 
 def _make_mail_item(
     subject="Test email",
@@ -46,6 +47,7 @@ def _make_mail_item(
 # safe_str
 # ---------------------------------------------------------------------------
 
+
 class TestSafeStr:
     def test_none_returns_empty(self):
         assert ot.safe_str(None) == ""
@@ -68,6 +70,7 @@ class TestSafeStr:
 # naive_dt
 # ---------------------------------------------------------------------------
 
+
 class TestNaiveDt:
     def test_naive_datetime_unchanged(self):
         dt = datetime(2024, 3, 1, 10, 0, 0)
@@ -75,6 +78,7 @@ class TestNaiveDt:
 
     def test_aware_datetime_strips_tzinfo(self):
         import zoneinfo
+
         tz = zoneinfo.ZoneInfo("America/New_York")
         aware = datetime(2024, 3, 1, 10, 0, 0, tzinfo=tz)
         result = ot.naive_dt(aware)
@@ -92,6 +96,7 @@ class TestNaiveDt:
 # ---------------------------------------------------------------------------
 # keyword_score
 # ---------------------------------------------------------------------------
+
 
 class TestKeywordScore:
     def test_empty_string(self):
@@ -135,6 +140,7 @@ class TestKeywordScore:
 # is_noise / compile_patterns
 # ---------------------------------------------------------------------------
 
+
 class TestIsNoise:
     @pytest.fixture
     def pats(self):
@@ -173,6 +179,7 @@ class TestIsNoise:
 # recipient_count
 # ---------------------------------------------------------------------------
 
+
 class TestRecipientCount:
     def test_empty_string(self):
         assert ot.recipient_count("") == 0
@@ -194,12 +201,15 @@ class TestRecipientCount:
 # is_reply_or_forward
 # ---------------------------------------------------------------------------
 
+
 class TestIsReplyOrForward:
     @pytest.mark.parametrize("subject", ["RE: hello", "re: hello", "Re: hello"])
     def test_reply_prefix(self, subject):
         assert ot.is_reply_or_forward(subject) == 1
 
-    @pytest.mark.parametrize("subject", ["FW: hello", "fw: hello", "FWD: hello", "fwd: hello"])
+    @pytest.mark.parametrize(
+        "subject", ["FW: hello", "fw: hello", "FWD: hello", "fwd: hello"]
+    )
     def test_forward_prefix(self, subject):
         assert ot.is_reply_or_forward(subject) == 1
 
@@ -216,6 +226,7 @@ class TestIsReplyOrForward:
 # ---------------------------------------------------------------------------
 # merge_categories
 # ---------------------------------------------------------------------------
+
 
 class TestMergeCategories:
     def test_add_to_empty_existing(self):
@@ -242,6 +253,7 @@ class TestMergeCategories:
 # ---------------------------------------------------------------------------
 # choose_final_bucket
 # ---------------------------------------------------------------------------
+
 
 class TestChooseFinalBucket:
     def test_rule_urgent_always_wins(self):
@@ -273,6 +285,7 @@ class TestChooseFinalBucket:
 # already_triaged
 # ---------------------------------------------------------------------------
 
+
 class TestAlreadyTriaged:
     @pytest.mark.parametrize("cat", ["Urgent", "Action", "Waiting", "FYI", "Noise"])
     def test_triage_categories_detected(self, cat):
@@ -297,6 +310,7 @@ class TestAlreadyTriaged:
 # has_non_triage_categories
 # ---------------------------------------------------------------------------
 
+
 class TestHasNonTriageCategories:
     @pytest.mark.parametrize("cat", ["Urgent", "Action", "Waiting", "FYI", "Noise"])
     def test_only_triage_returns_false(self, cat):
@@ -320,6 +334,7 @@ class TestHasNonTriageCategories:
 # ---------------------------------------------------------------------------
 # load_vips
 # ---------------------------------------------------------------------------
+
 
 class TestLoadVips:
     def test_empty_file(self, tmp_path):
@@ -375,6 +390,7 @@ class TestLoadVips:
 # rule_score_and_bucket
 # ---------------------------------------------------------------------------
 
+
 class TestRuleScoreAndBucket:
     @pytest.fixture
     def pats(self):
@@ -386,18 +402,24 @@ class TestRuleScoreAndBucket:
 
     def test_vip_sender_score_boost(self, pats, now):
         item = _make_mail_item(sender_email="vip@corp.com", to_line="me@corp.com")
-        score, bucket, reasons, _ = ot.rule_score_and_bucket(item, {"vip@corp.com"}, pats, now)
+        score, bucket, reasons, _ = ot.rule_score_and_bucket(
+            item, {"vip@corp.com"}, pats, now
+        )
         assert score >= 50
         assert "VIP_sender" in reasons
 
     def test_non_vip_no_boost(self, pats, now):
         item = _make_mail_item(sender_email="random@corp.com", to_line="me@corp.com")
-        score, _, reasons, _ = ot.rule_score_and_bucket(item, {"vip@corp.com"}, pats, now)
+        score, _, reasons, _ = ot.rule_score_and_bucket(
+            item, {"vip@corp.com"}, pats, now
+        )
         assert "VIP_sender" not in reasons
 
     def test_urgent_keyword_bucket(self, pats, now):
         # urgent(40) + rmd(35) + deadline(30) + today(25) + to(10) = 140
-        item = _make_mail_item(subject="URGENT: RMD deadline today", to_line="me@corp.com")
+        item = _make_mail_item(
+            subject="URGENT: RMD deadline today", to_line="me@corp.com"
+        )
         score, bucket, _, _ = ot.rule_score_and_bucket(item, set(), pats, now)
         assert bucket == ot.CAT_URGENT
         assert score >= 80
@@ -446,7 +468,9 @@ class TestRuleScoreAndBucket:
         item = _make_mail_item(subject="very old email")
         # 100 days old → age_hours=2400 → min(25, 2400//24*5)=min(25,500)=25
         ancient = datetime.now() - timedelta(days=100)
-        score, _, reasons, features = ot.rule_score_and_bucket(item, set(), pats, ancient)
+        score, _, reasons, features = ot.rule_score_and_bucket(
+            item, set(), pats, ancient
+        )
         assert "age_penalty" in reasons
         # Penalty capped at 25
         fresh = datetime.now()
@@ -478,10 +502,19 @@ class TestRuleScoreAndBucket:
         item = _make_mail_item()
         _, _, _, features = ot.rule_score_and_bucket(item, set(), pats, now)
         expected = {
-            "sender_email", "sender_name", "subject", "body_snippet",
-            "to_line", "cc_line", "age_hours", "has_attachment",
-            "thread_depth", "recipient_count", "is_reply_or_fwd",
-            "rule_score", "is_noise_hint",
+            "sender_email",
+            "sender_name",
+            "subject",
+            "body_snippet",
+            "to_line",
+            "cc_line",
+            "age_hours",
+            "has_attachment",
+            "thread_depth",
+            "recipient_count",
+            "is_reply_or_fwd",
+            "rule_score",
+            "is_noise_hint",
         }
         assert expected.issubset(features.keys())
 
@@ -503,6 +536,7 @@ class TestRuleScoreAndBucket:
 # Scoring thresholds — bucket boundary table
 # ---------------------------------------------------------------------------
 
+
 class TestBucketBoundaries:
     """Verify bucket assignment at threshold boundaries."""
 
@@ -512,27 +546,35 @@ class TestBucketBoundaries:
 
     def test_score_80_is_urgent(self, pats):
         item = _make_mail_item(subject="URGENT RMD deadline today", to_line="me@co.com")
-        score, bucket, _, _ = ot.rule_score_and_bucket(item, set(), pats, datetime.now())
+        score, bucket, _, _ = ot.rule_score_and_bucket(
+            item, set(), pats, datetime.now()
+        )
         assert score >= 80
         assert bucket == ot.CAT_URGENT
 
     def test_score_45_is_action(self, pats):
         # acat(35) + to(10) = 45 → Action
         item = _make_mail_item(subject="ACAT", to_line="me@co.com")
-        score, bucket, _, _ = ot.rule_score_and_bucket(item, set(), pats, datetime.now())
+        score, bucket, _, _ = ot.rule_score_and_bucket(
+            item, set(), pats, datetime.now()
+        )
         assert score == 45
         assert bucket == ot.CAT_ACTION
 
     def test_score_20_is_waiting(self, pats):
         # today(25) + no to_line(0) = 25 → Waiting
         item = _make_mail_item(subject="today", to_line="")
-        score, bucket, _, _ = ot.rule_score_and_bucket(item, set(), pats, datetime.now())
+        score, bucket, _, _ = ot.rule_score_and_bucket(
+            item, set(), pats, datetime.now()
+        )
         assert score == 25
         assert bucket == ot.CAT_WAITING
 
     def test_score_below_20_is_fyi(self, pats):
         item = _make_mail_item(subject="no keywords here")
-        score, bucket, _, _ = ot.rule_score_and_bucket(item, set(), pats, datetime.now())
+        score, bucket, _, _ = ot.rule_score_and_bucket(
+            item, set(), pats, datetime.now()
+        )
         assert score < 20
         assert bucket == ot.CAT_FYI
 
@@ -540,6 +582,7 @@ class TestBucketBoundaries:
 # ---------------------------------------------------------------------------
 # Cutoff safety net
 # ---------------------------------------------------------------------------
+
 
 class TestCutoffSafetyNet:
     """
@@ -567,6 +610,7 @@ class TestCutoffSafetyNet:
 # ---------------------------------------------------------------------------
 # thread_depth
 # ---------------------------------------------------------------------------
+
 
 class TestThreadDepth:
     def test_short_index_returns_zero(self):
