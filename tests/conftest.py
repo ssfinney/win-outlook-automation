@@ -6,6 +6,7 @@ file I/O to a temporary directory before outlook_triage is imported.
 import os
 import sys
 import tempfile
+from pathlib import Path
 from unittest.mock import MagicMock
 
 # Ensure imports work when pytest is invoked from outside repo root.
