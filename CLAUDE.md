@@ -10,7 +10,7 @@ Local-only Windows email triage automation for Microsoft Outlook (Classic/COM). 
 
 ```bash
 # Lint (max line length 120)
-flake8 outlook_triage.py train_model.py --max-line-length=120
+ruff check outlook_triage.py train_model.py --line-length=120
 
 # Security scan (medium+ severity)
 bandit outlook_triage.py train_model.py -ll
@@ -62,4 +62,4 @@ Tests run cross-platform (Linux/CI). `tests/conftest.py` mocks `win32com`/`pytho
 
 ## CI
 
-`.github/workflows/ci.yml` runs on Ubuntu (Python 3.12): flake8 → bandit → pytest.
+`.github/workflows/ci.yml` runs on Ubuntu (Python 3.12): ruff → bandit → pytest.

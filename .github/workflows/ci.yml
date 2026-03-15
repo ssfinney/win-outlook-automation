@@ -26,7 +26,7 @@ jobs:
         run: |
           python -m pip install --upgrade pip
           pip install \
-            flake8 \
+            ruff \
             bandit \
             pytest \
             pandas \
@@ -35,8 +35,8 @@ jobs:
             joblib
 
       # ── Lint ──────────────────────────────────────────────────────────────
-      - name: flake8
-        run: flake8 outlook_triage.py train_model.py --max-line-length=120
+      - name: ruff
+        run: ruff check outlook_triage.py train_model.py --line-length=120
 
       # ── Security scan ─────────────────────────────────────────────────────
       - name: bandit (medium + high severity only)
