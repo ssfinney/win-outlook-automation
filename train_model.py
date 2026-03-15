@@ -144,7 +144,7 @@ def build_pipeline() -> Pipeline:
             (
                 "sender_tfidf",
                 TfidfVectorizer(
-                    token_pattern=r"[a-zA-Z0-9_.+-]+@[a-zA-Z0-9-]+\.[a-zA-Z0-9-.]+",
+                    token_pattern=r"[a-zA-Z0-9_.+-]+@[a-zA-Z0-9-]+\.[a-zA-Z0-9-.]+",  # nosec B106 (email regex, not credential)
                     min_df=1,
                 ),
                 "sender_email",

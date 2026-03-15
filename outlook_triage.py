@@ -226,8 +226,8 @@ def get_sender_email(mail_item) -> str:
         addr = safe_str(mail_item.SenderEmailAddress)
         if addr and "@" in addr:
             return addr.lower()
-    except Exception:
-        pass
+    except Exception as e:
+        logger.debug(f"Unable to read SenderEmailAddress directly: {e}")
 
     try:
         sender = mail_item.Sender
@@ -237,8 +237,8 @@ def get_sender_email(mail_item) -> str:
                 smtp = safe_str(ex_user.PrimarySmtpAddress)
                 if smtp and "@" in smtp:
                     return smtp.lower()
-    except Exception:
-        pass
+    except Exception as e:
+        logger.debug(f"Unable to resolve Exchange sender SMTP address: {e}")
 
     return ""
 
@@ -264,8 +264,8 @@ def thread_depth(mail_item) -> int:
         idx = safe_str(getattr(mail_item, "ConversationIndex", ""))
         if len(idx) > 44:
             return (len(idx) - 44) // 10
-    except Exception:
-        pass
+    except Exception as e:
+        logger.debug(f"Unable to derive conversation thread depth: {e}")
     return 0
 
 
@@ -287,8 +287,8 @@ def already_triaged(mail_item) -> bool:
             for cat in cats.split(","):
                 if cat.strip() in TRIAGE_CATEGORIES:
                     return True
-    except Exception:
-        pass
+    except Exception as e:
+        logger.debug(f"Unable to inspect existing categories: {e}")
     return False
 
 
@@ -352,8 +352,8 @@ def rule_score_and_bucket(
         if attach_count > 0:
             score += 8
             reasons.append("has_attachment")
-    except Exception:
-        pass
+    except Exception as e:
+        logger.debug(f"Unable to inspect attachment count: {e}")
 
     age_hours = 0.0
     try:
@@ -361,8 +361,8 @@ def rule_score_and_bucket(
         if age_hours > 24:
             score -= int(min(25, age_hours // 24 * 5))
             reasons.append("age_penalty")
-    except Exception:
-        pass
+    except Exception as e:
+        logger.debug(f"Unable to compute age penalty: {e}")
 
     noise = is_noise(subject, sender_email, noise_pats)
     if noise:
@@ -512,8 +512,8 @@ def collect_items(inbox) -> list:
                 entry_id = safe_str(getattr(item, "EntryID", ""))
                 if entry_id:
                     result.append(entry_id)
-        except Exception:
-            pass
+        except Exception as e:
+            logger.debug(f"Skipping item during inbox scan due to COM error: {e}")
         try:
             item = items.GetNext()
         except Exception:
