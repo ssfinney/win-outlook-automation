@@ -8,11 +8,12 @@
 import os
 import re
 import logging
+from contextlib import suppress
 from logging.handlers import RotatingFileHandler
 from dataclasses import dataclass
 from datetime import datetime, timedelta
 from pathlib import Path
-from typing import List, Any, Dict, Tuple, Set
+from typing import Any
 
 import pandas as pd
 
@@ -20,7 +21,10 @@ try:
     import win32com.client
     import pythoncom
 except ImportError:
-    print("ERROR: pywin32 not installed or incompatible. Use Python 3.12 for this project.")
+    print(
+        "ERROR: pywin32 not installed or incompatible. "
+        "Use Python 3.12 for this project."
+    )
     raise
 
 try:
@@ -31,8 +35,11 @@ except Exception:
 # =====================
 # Configuration (edit here)
 # =====================
-# Storage base. Defaults to OneDrive\\AI_Outlook if OneDrive is set, else ~/OneDrive/AI_Outlook.
-BASE_DIR = Path(os.environ.get("OneDrive", str(Path.home() / "OneDrive"))) / "AI_Outlook"
+# Storage base. Defaults to ONEDRIVE\AI_Outlook if ONEDRIVE is set,
+# else ~/OneDrive/AI_Outlook.
+BASE_DIR = (
+    Path(os.environ.get("ONEDRIVE", str(Path.home() / "OneDrive"))) / "AI_Outlook"
+)
 
 # Lookback window for scanning the inbox.
 DAYS_BACK = 7
@@ -70,7 +77,9 @@ def validate_config() -> None:
         raise ValueError(f"DAYS_BACK must be an int between 1 and 90 (got {DAYS_BACK})")
 
     if not isinstance(MAX_ITEMS, int) or MAX_ITEMS <= 0 or MAX_ITEMS > 5000:
-        raise ValueError(f"MAX_ITEMS must be an int between 1 and 5000 (got {MAX_ITEMS})")
+        raise ValueError(
+            f"MAX_ITEMS must be an int between 1 and 5000 (got {MAX_ITEMS})"
+        )
 
     if not isinstance(MOVE_NOISE_TO_READ_LATER, bool):
         raise ValueError("MOVE_NOISE_TO_READ_LATER must be a bool")
@@ -115,7 +124,9 @@ NOISE_PATTERNS = [
     r"\bno[- ]reply\b",
 ]
 
-VIP_SENDERS_CSV = Path(os.environ.get("VIP_SENDERS_CSV_PATH", str(CONFIG_DIR / "vip_senders.csv")))
+VIP_SENDERS_CSV = Path(
+    os.environ.get("VIP_SENDERS_CSV_PATH", str(CONFIG_DIR / "vip_senders.csv"))
+)
 
 
 def ensure_dirs() -> None:
@@ -129,8 +140,12 @@ logger = logging.getLogger("outlook_triage")
 def _setup_logging() -> None:
     logger.setLevel(logging.INFO)
     if not logger.handlers:
-        _handler = RotatingFileHandler(LOG_FILE, maxBytes=2_000_000, backupCount=3, encoding="utf-8")
-        _handler.setFormatter(logging.Formatter("%(asctime)s - %(levelname)s - %(message)s"))
+        _handler = RotatingFileHandler(
+            LOG_FILE, maxBytes=2_000_000, backupCount=3, encoding="utf-8"
+        )
+        _handler.setFormatter(
+            logging.Formatter("%(asctime)s - %(levelname)s - %(message)s")
+        )
         logger.addHandler(_handler)
 
 
@@ -176,15 +191,17 @@ def naive_dt(dt_val) -> datetime:
         return datetime.min
 
 
-def load_vips() -> Set[str]:
-    vips: Set[str] = set()
+def load_vips() -> set[str]:
+    vips: set[str] = set()
 
     try:
         VIP_SENDERS_CSV.parent.mkdir(parents=True, exist_ok=True)
         if not VIP_SENDERS_CSV.exists():
             VIP_SENDERS_CSV.write_text("", encoding="utf-8")
     except Exception as e:
-        logger.warning(f"Could not initialize VIP senders file at {VIP_SENDERS_CSV}: {e}")
+        logger.warning(
+            f"Could not initialize VIP senders file at {VIP_SENDERS_CSV}: {e}"
+        )
         return vips
 
     for line in VIP_SENDERS_CSV.read_text(encoding="utf-8").splitlines():
@@ -199,7 +216,7 @@ def load_vips() -> Set[str]:
     return vips
 
 
-def compile_patterns(patterns: List[str]) -> List[re.Pattern]:
+def compile_patterns(patterns: list[str]) -> list[re.Pattern]:
     return [re.compile(pat, flags=re.IGNORECASE) for pat in patterns]
 
 
@@ -226,12 +243,12 @@ def get_sender_email(mail_item) -> str:
     return ""
 
 
-def is_noise(subject: str, sender_email: str, patterns: List[re.Pattern]) -> bool:
+def is_noise(subject: str, sender_email: str, patterns: list[re.Pattern]) -> bool:
     blob = f"{subject} {sender_email}"
     return any(p.search(blob) for p in patterns)
 
 
-def keyword_score(text: str) -> Tuple[int, List[str]]:
+def keyword_score(text: str) -> tuple[int, list[str]]:
     s = 0
     hits = []
     t = text.lower()
@@ -297,8 +314,8 @@ def merge_categories(existing_cats: str, add_cat: str) -> str:
 
 
 def rule_score_and_bucket(
-    mail_item, vips: set, noise_pats: List[re.Pattern], received: datetime = None
-) -> Tuple[int, str, str, Dict[str, Any]]:
+    mail_item, vips: set, noise_pats: list[re.Pattern], received: datetime = None
+) -> tuple[int, str, str, dict[str, Any]]:
     subject = safe_str(mail_item.Subject)
     sender_email = get_sender_email(mail_item)
     to_line = safe_str(mail_item.To)
@@ -306,7 +323,7 @@ def rule_score_and_bucket(
     if received is None:
         received = naive_dt(mail_item.ReceivedTime)
 
-    reasons: List[str] = []
+    reasons: list[str] = []
     score = 0
 
     if sender_email and sender_email in vips:
@@ -321,10 +338,8 @@ def rule_score_and_bucket(
         reasons.append("CC_present")
 
     body_snippet = ""
-    try:
+    with suppress(Exception):
         body_snippet = safe_str(mail_item.Body)[:500]
-    except Exception:
-        pass
 
     kscore, hits = keyword_score(f"{subject} {body_snippet}")
     if kscore:
@@ -396,7 +411,7 @@ def load_model():
     return None
 
 
-def choose_final_bucket(rule_bucket: str, model_bucket: str, rule_score: int) -> str:
+def choose_final_bucket(rule_bucket: str, model_bucket: str, _rule_score: int) -> str:
     if rule_bucket == CAT_URGENT:
         return CAT_URGENT
     if rule_bucket == CAT_NOISE:
@@ -423,7 +438,10 @@ def apply_actions(mail_item, final_bucket: str, read_later) -> str:
         return "dry_run"
 
     if PROTECT_NON_TRIAGE_CATEGORIES and has_non_triage_categories(mail_item):
-        logger.info(f"Skip actions (manual/non-triage categories present): '{safe_str(mail_item.Subject)}'")
+        logger.info(
+            "Skip actions (manual/non-triage categories present): "
+            f"'{safe_str(mail_item.Subject)}'"
+        )
         return "skipped_manual_categories"
 
     try:
@@ -436,10 +454,16 @@ def apply_actions(mail_item, final_bucket: str, read_later) -> str:
 
         mail_item.Save()
     except Exception as e:
-        logger.warning(f"Failed to apply actions to '{safe_str(mail_item.Subject)}': {e}")
+        logger.warning(
+            f"Failed to apply actions to '{safe_str(mail_item.Subject)}': {e}"
+        )
         return "failed_apply"
 
-    if final_bucket == CAT_NOISE and MOVE_NOISE_TO_READ_LATER and read_later is not None:
+    if (
+        final_bucket == CAT_NOISE
+        and MOVE_NOISE_TO_READ_LATER
+        and read_later is not None
+    ):
         try:
             mail_item.Move(read_later)
         except Exception as e:
@@ -449,8 +473,8 @@ def apply_actions(mail_item, final_bucket: str, read_later) -> str:
     return "applied"
 
 
-def collect_items(inbox) -> List:
-    """COM-safe enumeration of recent mail items without holding COM objects longer than needed."""
+def collect_items(inbox) -> list:
+    """COM-safe enumeration of recent mail items with bounded COM object lifetimes."""
     items = inbox.Items
     items.Sort("[ReceivedTime]", True)
 
@@ -474,12 +498,13 @@ def collect_items(inbox) -> List:
         try:
             if getattr(item, "Class", None) == 43:
                 # When Restrict failed, enforce the cutoff in Python and stop early
-                # (items are sorted newest-first, so once we pass the window we are done).
+                # (items are sorted newest-first; once past window, stop).
                 if not restrict_succeeded:
                     received = naive_dt(getattr(item, "ReceivedTime", None))
                     if received < cutoff:
                         break
-                # Store stable ID, then re-bind during processing. Holding many COM item objects can
+                # Store stable ID, then re-bind during processing.
+                # Holding many COM item objects can
                 # make Outlook sluggish or unstable on large mailboxes.
                 entry_id = safe_str(getattr(item, "EntryID", ""))
                 if entry_id:
@@ -511,11 +536,15 @@ def main():
         return
 
     inbox = outlook.GetDefaultFolder(6)
-    read_later = ensure_outlook_folder(outlook, FOLDER_READ_LATER) if MOVE_NOISE_TO_READ_LATER else None
+    read_later = (
+        ensure_outlook_folder(outlook, FOLDER_READ_LATER)
+        if MOVE_NOISE_TO_READ_LATER
+        else None
+    )
 
     items_list = collect_items(inbox)
 
-    scored: List[ScoredMail] = []
+    scored: list[ScoredMail] = []
     processed = 0
     skipped = 0
     errors = 0
@@ -551,7 +580,9 @@ def main():
         cc_line = safe_str(item.CC)
 
         try:
-            rule_score, rule_bucket, reasons, features = rule_score_and_bucket(item, vips, noise_pats, received)
+            rule_score, rule_bucket, reasons, features = rule_score_and_bucket(
+                item, vips, noise_pats, received
+            )
 
             model_bucket = ""
             if model is not None:
@@ -604,7 +635,9 @@ def main():
 
     df = pd.DataFrame([s.__dict__ for s in scored])
     if not df.empty:
-        df.sort_values(by=["rule_score", "received"], ascending=[False, False], inplace=True)
+        df.sort_values(
+            by=["rule_score", "received"], ascending=[False, False], inplace=True
+        )
 
     df.to_csv(log_csv, index=False, encoding="utf-8")
 
@@ -632,7 +665,9 @@ def main():
         _formula_chars = ("=", "+", "-", "@", "|", "%")
         for col in df_out.select_dtypes(include=["object"]).columns:
             df_out[col] = df_out[col].apply(
-                lambda v: ("'" + v) if isinstance(v, str) and v and v[0] in _formula_chars else v
+                lambda v: ("'" + v)
+                if isinstance(v, str) and v and v[0] in _formula_chars
+                else v
             )
         df_out.to_excel(writer, sheet_name="All Scored", index=False)
 
@@ -643,12 +678,17 @@ def main():
             ("FYI", CAT_FYI),
             ("Noise", CAT_NOISE),
         ]:
-            sub = df_out[df_out["final_bucket"] == bucket].head(EXCEL_BUCKET_ROW_LIMIT) if not df_out.empty else df_out
+            sub = (
+                df_out[df_out["final_bucket"] == bucket].head(EXCEL_BUCKET_ROW_LIMIT)
+                if not df_out.empty
+                else df_out
+            )
             sub.to_excel(writer, sheet_name=name, index=False)
 
     logger.info(
         f"Processed={processed} skipped={skipped} errors={errors} "
-        f"dry_run={DRY_RUN} days_back={DAYS_BACK} max_items={MAX_ITEMS} report={report_xlsx}"
+        f"dry_run={DRY_RUN} days_back={DAYS_BACK} "
+        f"max_items={MAX_ITEMS} report={report_xlsx}"
     )
     print(
         f"Processed {processed} emails ({skipped} skipped, {errors} errors) "
@@ -656,10 +696,8 @@ def main():
     )
 
     outlook = None
-    try:
+    with suppress(Exception):
         pythoncom.CoUninitialize()
-    except Exception:
-        pass
 
 
 if __name__ == "__main__":

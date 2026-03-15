@@ -19,7 +19,9 @@ from sklearn.impute import SimpleImputer
 from sklearn.metrics import classification_report
 from sklearn.model_selection import train_test_split
 
-BASE_DIR = Path(os.environ.get("OneDrive", str(Path.home() / "OneDrive"))) / "AI_Outlook"
+BASE_DIR = (
+    Path(os.environ.get("ONEDRIVE", str(Path.home() / "OneDrive"))) / "AI_Outlook"
+)
 DATA_DIR = BASE_DIR / "data"
 OUTPUT_DIR = BASE_DIR / "outputs"
 MODEL_DIR = BASE_DIR / "model"
@@ -33,8 +35,10 @@ DATA_DIR.mkdir(parents=True, exist_ok=True)
 
 logger = logging.getLogger("train_model")
 logger.setLevel(logging.INFO)
-_handler = RotatingFileHandler(LOG_FILE, maxBytes=2_000_000, backupCount=3, encoding="utf-8")
-_handler.setFormatter(logging.Formatter('%(asctime)s - %(levelname)s - %(message)s'))
+_handler = RotatingFileHandler(
+    LOG_FILE, maxBytes=2_000_000, backupCount=3, encoding="utf-8"
+)
+_handler.setFormatter(logging.Formatter("%(asctime)s - %(levelname)s - %(message)s"))
 logger.addHandler(_handler)
 
 LABELS = {"Urgent", "Action", "Waiting", "FYI", "Noise"}
@@ -109,7 +113,9 @@ def load_labeled_rows() -> pd.DataFrame:
         rows.append(df)
 
     if not rows:
-        raise RuntimeError("No labeled rows found. Fill 'label' with: Urgent/Action/Waiting/FYI/Noise")
+        raise RuntimeError(
+            "No labeled rows found. Fill 'label' with: Urgent/Action/Waiting/FYI/Noise"
+        )
 
     df_combined = pd.concat(rows, ignore_index=True)
 
@@ -124,12 +130,16 @@ def load_labeled_rows() -> pd.DataFrame:
 def build_pipeline() -> Pipeline:
     pre = ColumnTransformer(
         transformers=[
-            # min_df=2 on subject/body filters single-occurrence noise without risking an
-            # empty vocabulary (these fields have repeated tokens across rows).
+            # min_df=2 on subject/body filters single-occurrence noise.
+            # These fields have repeated tokens across rows.
             ("subject_tfidf", TfidfVectorizer(ngram_range=(1, 2), min_df=2), "subject"),
-            ("body_tfidf", TfidfVectorizer(ngram_range=(1, 2), min_df=2, max_features=500), "body_snippet"),
-            # sender_email, to_line, cc_line are often mostly-unique across a small dataset;
-            # min_df=1 avoids an empty-vocabulary error that would crash pipe.fit().
+            (
+                "body_tfidf",
+                TfidfVectorizer(ngram_range=(1, 2), min_df=2, max_features=500),
+                "body_snippet",
+            ),
+            # sender_email, to_line, cc_line are often mostly unique in
+            # small datasets; min_df=1 avoids empty-vocabulary errors.
             (
                 "sender_tfidf",
                 TfidfVectorizer(
@@ -196,7 +206,11 @@ def main():
         )
     else:
         X_train, X_test, y_train, y_test = X, X, y, y
-        logger.info(f"Dataset too small for split ({len(df)} rows, {y.nunique()} classes). Training on all data.")
+        logger.info(
+            "Dataset too small for split "
+            f"({len(df)} rows, {y.nunique()} classes). "
+            "Training on all data."
+        )
 
     pipe = build_pipeline()
     pipe.fit(X_train, y_train)
