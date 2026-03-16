@@ -1,4 +1,7 @@
 import pandas as pd
+import warnings
+
+from sklearn.exceptions import UndefinedMetricWarning
 
 import train_model as tm
 
@@ -52,6 +55,13 @@ def test_normalize_text_columns_unescapes_report_export_values():
     assert out.loc[1, "subject"] == ""
 
 
+def test_normalize_text_value_handles_missing_and_escaped_values():
+    assert tm.normalize_text_value(None) == ""
+    assert tm.normalize_text_value(float("nan")) == ""
+    assert tm.normalize_text_value("'=hello") == "=hello"
+    assert tm.normalize_text_value("plain") == "plain"
+
+
 def test_load_labeled_rows_normalizes_label_and_text(monkeypatch):
     sample = pd.DataFrame(
         {
@@ -100,6 +110,21 @@ def test_build_pipeline_returns_pipeline():
     assert isinstance(pipe, Pipeline)
     assert "pre" in pipe.named_steps
     assert "clf" in pipe.named_steps
+
+
+def test_build_classification_report_suppresses_undefined_metric_warning():
+    y_true = pd.Series(["Urgent", "Urgent", "FYI"])
+    y_pred = pd.Series(["Urgent", "Urgent", "Urgent"])
+
+    with warnings.catch_warnings(record=True) as caught:
+        warnings.simplefilter("always")
+        report = tm.build_classification_report(y_true, y_pred)
+
+    assert "Urgent" in report
+    assert "FYI" in report
+    assert not any(
+        issubclass(w.category, UndefinedMetricWarning) for w in caught
+    )
 
 
 def test_load_labeled_rows_deduplicates_by_entry_id(monkeypatch):

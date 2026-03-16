@@ -17,7 +17,9 @@ from sklearn.compose import ColumnTransformer
 from sklearn.preprocessing import StandardScaler
 from sklearn.impute import SimpleImputer
 from sklearn.metrics import classification_report
+from sklearn.exceptions import UndefinedMetricWarning
 from sklearn.model_selection import train_test_split
+import warnings
 
 def resolve_base_dir() -> Path:
     explicit_base_dir = os.environ.get("AI_OUTLOOK_BASE_DIR")
@@ -48,7 +50,8 @@ if not logger.handlers:
     _handler.setFormatter(logging.Formatter("%(asctime)s - %(levelname)s - %(message)s"))
     logger.addHandler(_handler)
 
-LABELS = {"Urgent", "Action", "Waiting", "FYI", "Noise"}
+LABEL_ORDER = ["Urgent", "Action", "Waiting", "FYI", "Noise"]
+LABELS = set(LABEL_ORDER)
 
 TEXT_COLS = ["subject", "body_snippet", "sender_email", "to_line", "cc_line"]
 NUMERIC_COLS = [
@@ -85,12 +88,29 @@ def normalize_label(value) -> str:
     return _LABEL_MAP.get(str(cleaned).strip().lower(), "")
 
 
+def normalize_text_value(value) -> str:
+    if pd.isna(value):
+        return ""
+    return str(strip_excel_formula_escape(value))
+
+
 def normalize_text_columns(df: pd.DataFrame, text_cols) -> pd.DataFrame:
     for col in text_cols:
         if col not in df.columns:
             df[col] = ""
-        df[col] = df[col].fillna("").astype(str).map(strip_excel_formula_escape)
+        df[col] = df[col].map(normalize_text_value)
     return df
+
+
+def build_classification_report(y_true, y_pred) -> str:
+    with warnings.catch_warnings():
+        warnings.simplefilter("ignore", category=UndefinedMetricWarning)
+        return classification_report(
+            y_true,
+            y_pred,
+            labels=LABEL_ORDER,
+            zero_division=0,
+        )
 
 
 def load_labeled_rows() -> pd.DataFrame:
@@ -223,7 +243,7 @@ def main():
 
     if do_split:
         preds = pipe.predict(X_test)
-        report = classification_report(y_test, preds)
+        report = build_classification_report(y_test, preds)
         print(report)
         logger.info(f"Classification Report:\n{report}")
 
