@@ -106,6 +106,7 @@ CAT_FYI = "FYI"
 CAT_NOISE = "Noise"
 TRIAGE_CATEGORIES = {CAT_URGENT, CAT_ACTION, CAT_WAITING, CAT_FYI, CAT_NOISE}
 FOLDER_READ_LATER = "Read Later"
+FORMULA_PREFIX_CHARS = ("=", "+", "-", "@", "|", "%")
 
 KEYWORD_WEIGHTS = {
     "rollover": 30,
@@ -187,6 +188,18 @@ def safe_str(x: Any) -> str:
         return str(x) if x is not None else ""
     except Exception:
         return ""
+
+
+def escape_excel_formula_text(value: Any) -> Any:
+    if isinstance(value, str) and value and value[0] in FORMULA_PREFIX_CHARS:
+        return "'" + value
+    return value
+
+
+def sanitize_excel_formula_columns(df: pd.DataFrame) -> pd.DataFrame:
+    for col in df.select_dtypes(include=["object", "string"]).columns:
+        df[col] = df[col].map(escape_excel_formula_text)
+    return df
 
 
 def naive_dt(dt_val) -> datetime:
@@ -694,13 +707,7 @@ def main():
         df_out.insert(0, "label", "")
         # Sanitize string columns: prepend ' to cells starting with Excel
         # formula trigger characters so they are not evaluated when opened.
-        _formula_chars = ("=", "+", "-", "@", "|", "%")
-        for col in df_out.select_dtypes(include=["object"]).columns:
-            df_out[col] = df_out[col].apply(
-                lambda v: ("'" + v)
-                if isinstance(v, str) and v and v[0] in _formula_chars
-                else v
-            )
+        df_out = sanitize_excel_formula_columns(df_out)
         df_out.to_excel(writer, sheet_name="All Scored", index=False)
 
         for name, bucket in [

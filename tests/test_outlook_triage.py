@@ -6,6 +6,7 @@ bucket thresholds, and the cutoff safety net — without requiring a live
 Outlook / Windows environment.
 """
 
+import pandas as pd
 import pytest
 from datetime import datetime, timedelta
 from unittest.mock import MagicMock, PropertyMock, patch
@@ -64,6 +65,32 @@ class TestSafeStr:
                 raise RuntimeError("boom")
 
         assert ot.safe_str(Unstreable()) == ""
+
+
+class TestExcelSanitization:
+    def test_escape_excel_formula_text_prefixes_string_values(self):
+        assert ot.escape_excel_formula_text("=SUM(A1:A2)") == "'=SUM(A1:A2)"
+        assert ot.escape_excel_formula_text("+hello") == "'+hello"
+        assert ot.escape_excel_formula_text("plain") == "plain"
+
+    def test_escape_excel_formula_text_leaves_non_strings_unchanged(self):
+        assert ot.escape_excel_formula_text(None) is None
+        assert ot.escape_excel_formula_text(123) == 123
+
+    def test_sanitize_excel_formula_columns_updates_only_text_columns(self):
+        df = pd.DataFrame(
+            {
+                "subject": ["=urgent", "plain"],
+                "count": [1, 2],
+                "label": ["+todo", ""],
+            }
+        )
+
+        out = ot.sanitize_excel_formula_columns(df.copy())
+
+        assert out.loc[0, "subject"] == "'=urgent"
+        assert out.loc[0, "label"] == "'+todo"
+        assert list(out["count"]) == [1, 2]
 
 
 # ---------------------------------------------------------------------------
