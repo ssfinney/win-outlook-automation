@@ -19,9 +19,15 @@ from sklearn.impute import SimpleImputer
 from sklearn.metrics import classification_report
 from sklearn.model_selection import train_test_split
 
-BASE_DIR = (
-    Path(os.environ.get("ONEDRIVE", str(Path.home() / "OneDrive"))) / "AI_Outlook"
-)
+def resolve_base_dir() -> Path:
+    explicit_base_dir = os.environ.get("AI_OUTLOOK_BASE_DIR")
+    if explicit_base_dir:
+        return Path(explicit_base_dir).expanduser()
+
+    return Path(os.environ.get("ONEDRIVE", str(Path.home() / "OneDrive"))) / "AI_Outlook"
+
+
+BASE_DIR = resolve_base_dir()
 DATA_DIR = BASE_DIR / "data"
 OUTPUT_DIR = BASE_DIR / "outputs"
 MODEL_DIR = BASE_DIR / "model"

@@ -387,6 +387,20 @@ class TestLoadVips:
 
 
 # ---------------------------------------------------------------------------
+# resolve_base_dir
+# ---------------------------------------------------------------------------
+
+
+class TestResolveBaseDir:
+    def test_explicit_override_beats_onedrive(self, monkeypatch, tmp_path):
+        explicit = tmp_path / "custom-ai-outlook"
+        monkeypatch.setenv("AI_OUTLOOK_BASE_DIR", str(explicit))
+        monkeypatch.setenv("ONEDRIVE", str(tmp_path / "OneDrive"))
+
+        assert ot.resolve_base_dir() == explicit
+
+
+# ---------------------------------------------------------------------------
 # rule_score_and_bucket
 # ---------------------------------------------------------------------------
 
@@ -530,6 +544,76 @@ class TestRuleScoreAndBucket:
         _, _, _, features = ot.rule_score_and_bucket(item, set(), pats, now)
         # beneficiary=30 should appear in body snippet scan
         assert features["rule_score"] >= 30
+
+
+# ---------------------------------------------------------------------------
+# collect_items
+# ---------------------------------------------------------------------------
+
+
+class _FakeInboxItems:
+    def __init__(self, items, restricted_items=None, restrict_error=None):
+        self._items = list(items)
+        self._restricted_items = restricted_items
+        self._restrict_error = restrict_error
+        self._iter_items = []
+        self._index = 0
+
+    @property
+    def Count(self):
+        return len(self._items)
+
+    def Sort(self, *_args):
+        self._items.sort(
+            key=lambda item: getattr(item, "ReceivedTime", datetime.min), reverse=True
+        )
+
+    def Restrict(self, _query):
+        if self._restrict_error is not None:
+            raise self._restrict_error
+        items = (
+            self._restricted_items
+            if self._restricted_items is not None
+            else self._items
+        )
+        return _FakeInboxItems(items)
+
+    def GetFirst(self):
+        self._iter_items = list(self._items)
+        self._index = 0
+        if not self._iter_items:
+            return None
+        return self._iter_items[0]
+
+    def GetNext(self):
+        self._index += 1
+        if self._index >= len(self._iter_items):
+            return None
+        return self._iter_items[self._index]
+
+
+class TestCollectItems:
+    def test_restrict_empty_falls_back_to_python_cutoff(self):
+        recent = MagicMock()
+        recent.Class = 43
+        recent.EntryID = "recent-1"
+        recent.ReceivedTime = datetime.now() - timedelta(hours=2)
+
+        inbox = MagicMock()
+        inbox.Items = _FakeInboxItems([recent], restricted_items=[])
+
+        assert ot.collect_items(inbox) == ["recent-1"]
+
+    def test_restrict_empty_fallback_still_skips_old_mail(self):
+        old_mail = MagicMock()
+        old_mail.Class = 43
+        old_mail.EntryID = "old-1"
+        old_mail.ReceivedTime = datetime.now() - timedelta(days=ot.DAYS_BACK + 2)
+
+        inbox = MagicMock()
+        inbox.Items = _FakeInboxItems([old_mail], restricted_items=[])
+
+        assert ot.collect_items(inbox) == []
 
 
 # ---------------------------------------------------------------------------

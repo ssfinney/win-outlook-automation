@@ -3,6 +3,14 @@ import pandas as pd
 import train_model as tm
 
 
+def test_resolve_base_dir_prefers_explicit_override(monkeypatch, tmp_path):
+    explicit = tmp_path / "custom-ai-outlook"
+    monkeypatch.setenv("AI_OUTLOOK_BASE_DIR", str(explicit))
+    monkeypatch.setenv("ONEDRIVE", str(tmp_path / "OneDrive"))
+
+    assert tm.resolve_base_dir() == explicit
+
+
 def test_strip_excel_formula_escape():
     assert tm.strip_excel_formula_escape("'=SUM(A1:A2)") == "=SUM(A1:A2)"
     assert tm.strip_excel_formula_escape("'+hello") == "+hello"

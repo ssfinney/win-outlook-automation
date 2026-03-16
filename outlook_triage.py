@@ -35,11 +35,19 @@ except Exception:
 # =====================
 # Configuration (edit here)
 # =====================
+def resolve_base_dir() -> Path:
+    # Allow an explicit override so users can keep outputs outside OneDrive
+    # while preserving the original default location.
+    explicit_base_dir = os.environ.get("AI_OUTLOOK_BASE_DIR")
+    if explicit_base_dir:
+        return Path(explicit_base_dir).expanduser()
+
+    return Path(os.environ.get("ONEDRIVE", str(Path.home() / "OneDrive"))) / "AI_Outlook"
+
+
 # Storage base. Defaults to ONEDRIVE\AI_Outlook if ONEDRIVE is set,
-# else ~/OneDrive/AI_Outlook.
-BASE_DIR = (
-    Path(os.environ.get("ONEDRIVE", str(Path.home() / "OneDrive"))) / "AI_Outlook"
-)
+# else ~/OneDrive/AI_Outlook. Set AI_OUTLOOK_BASE_DIR to override.
+BASE_DIR = resolve_base_dir()
 
 # Lookback window for scanning the inbox.
 DAYS_BACK = 7
@@ -473,36 +481,19 @@ def apply_actions(mail_item, final_bucket: str, read_later) -> str:
     return "applied"
 
 
-def collect_items(inbox) -> list:
-    """COM-safe enumeration of recent mail items with bounded COM object lifetimes."""
-    items = inbox.Items
-    items.Sort("[ReceivedTime]", True)
-
-    # Restrict by time first to reduce mailbox traversal work on large inboxes.
-    # Outlook Restrict expects US-style date format for ReceivedTime in many locales.
-    cutoff = datetime.now() - timedelta(days=DAYS_BACK)
-    restrict_succeeded = False
-    restrict_date = cutoff.strftime("%m/%d/%Y %I:%M %p")
+def _iterate_entry_ids(items, cutoff: datetime | None = None) -> list[str]:
+    """Enumerate mail entry IDs, optionally stopping once items are older than cutoff."""
     try:
-        # Outlook Jet filter syntax requires date values wrapped in # delimiters,
-        # not single quotes.  Using # is locale-independent and avoids the
-        # silent Restrict() failure seen on non-US locale machines.
-        items = items.Restrict(f"[ReceivedTime] >= #{restrict_date}#")
-        restrict_succeeded = True
+        items.Sort("[ReceivedTime]", True)
     except Exception as e:
-        logger.warning(
-            f"Could not apply ReceivedTime restriction; falling back to full scan "
-            f"with Python-side cutoff enforcement: {e}"
-        )
+        logger.warning(f"Could not sort inbox items by ReceivedTime: {e}")
 
     result = []
     item = items.GetFirst()
     while item is not None and len(result) < MAX_ITEMS:
         try:
             if getattr(item, "Class", None) == 43:
-                # When Restrict failed, enforce the cutoff in Python and stop early
-                # (items are sorted newest-first; once past window, stop).
-                if not restrict_succeeded:
+                if cutoff is not None:
                     received = naive_dt(getattr(item, "ReceivedTime", None))
                     if received < cutoff:
                         break
@@ -518,7 +509,45 @@ def collect_items(inbox) -> list:
             item = items.GetNext()
         except Exception:
             break
+
     return result
+
+
+def collect_items(inbox) -> list:
+    """COM-safe enumeration of recent mail items with bounded COM object lifetimes."""
+    items = inbox.Items
+
+    # Restrict by time first to reduce mailbox traversal work on large inboxes.
+    # Outlook Restrict expects US-style date format for ReceivedTime in many locales.
+    cutoff = datetime.now() - timedelta(days=DAYS_BACK)
+    restrict_date = cutoff.strftime("%m/%d/%Y %I:%M %p")
+    try:
+        # Outlook Jet filter syntax requires date values wrapped in # delimiters,
+        # not single quotes.  Using # is locale-independent and avoids the
+        # silent Restrict() failure seen on non-US locale machines.
+        restricted_items = items.Restrict(f"[ReceivedTime] >= #{restrict_date}#")
+        restricted_ids = _iterate_entry_ids(restricted_items)
+        if restricted_ids:
+            return restricted_ids
+
+        inbox_count = None
+        with suppress(Exception):
+            inbox_count = int(getattr(items, "Count", 0))
+
+        if inbox_count:
+            logger.warning(
+                "ReceivedTime restriction returned zero items while Inbox.Items.Count="
+                f"{inbox_count}; falling back to Python-side cutoff enforcement."
+            )
+        else:
+            return restricted_ids
+    except Exception as e:
+        logger.warning(
+            f"Could not apply ReceivedTime restriction; falling back to full scan "
+            f"with Python-side cutoff enforcement: {e}"
+        )
+
+    return _iterate_entry_ids(items, cutoff=cutoff)
 
 
 def main():
