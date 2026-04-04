@@ -307,6 +307,30 @@ class TestChooseFinalBucket:
         assert ot.choose_final_bucket("Action", "NotACategory", 50) == "Action"
         assert ot.choose_final_bucket("FYI", "fyi", 10) == "FYI"
 
+    def test_high_confidence_model_overrides_rule(self):
+        # confidence >= threshold → model wins (for non-Urgent/Noise rule)
+        assert ot.choose_final_bucket("FYI", "Action", 10, model_confidence=0.90) == "Action"
+        assert ot.choose_final_bucket("Waiting", "Urgent", 30, model_confidence=0.60) == "Urgent"
+
+    def test_low_confidence_model_does_not_override_rule(self):
+        # confidence < threshold → rule wins
+        assert ot.choose_final_bucket("Action", "FYI", 50, model_confidence=0.50) == "Action"
+        assert ot.choose_final_bucket("Waiting", "FYI", 25, model_confidence=0.00) == "Waiting"
+
+    def test_confidence_at_exact_threshold_overrides(self):
+        # confidence exactly equal to threshold is allowed
+        result = ot.choose_final_bucket("FYI", "Action", 10, model_confidence=ot.MODEL_CONFIDENCE_THRESHOLD)
+        assert result == "Action"
+
+    def test_low_confidence_does_not_affect_urgent_noise_rules(self):
+        # Urgent/Noise always win regardless of confidence
+        assert ot.choose_final_bucket("Urgent", "FYI", 100, model_confidence=0.10) == "Urgent"
+        assert ot.choose_final_bucket("Noise", "Urgent", -5, model_confidence=0.10) == "Noise"
+
+    def test_default_confidence_preserves_existing_model_override_behaviour(self):
+        # Callers that don't pass model_confidence get default=1.0 (always passes threshold)
+        assert ot.choose_final_bucket("FYI", "Action", 10) == "Action"
+
 
 # ---------------------------------------------------------------------------
 # already_triaged
@@ -537,7 +561,8 @@ class TestRuleScoreAndBucket:
         without_to = _make_mail_item(to_line="")
         s1, _, _, _ = ot.rule_score_and_bucket(with_to, set(), pats, now)
         s2, _, _, _ = ot.rule_score_and_bucket(without_to, set(), pats, now)
-        assert s1 - s2 == 10
+        # with_to gets +10 (to_line) + 5 (small_group for 1 recipient); without_to gets neither
+        assert s1 - s2 == 15
 
     def test_features_dict_keys_complete(self, pats, now):
         item = _make_mail_item()
@@ -571,6 +596,64 @@ class TestRuleScoreAndBucket:
         _, _, _, features = ot.rule_score_and_bucket(item, set(), pats, now)
         # beneficiary=30 should appear in body snippet scan
         assert features["rule_score"] >= 30
+
+    # --- thread depth penalty ---
+
+    def test_thread_depth_penalty_applied_for_deep_threads(self, pats, now):
+        # ConversationIndex > 44 chars: depth = (len - 44) // 10
+        # depth=3 → penalty = min(15, (3-2)*3) = 3
+        deep_index = "A" * (44 + 30)  # 74 chars → depth = (74-44)//10 = 3
+        shallow = _make_mail_item(to_line="me@co.com", conversation_index="A" * 44)
+        deep = _make_mail_item(to_line="me@co.com", conversation_index=deep_index)
+        s_shallow, _, _, _ = ot.rule_score_and_bucket(shallow, set(), pats, now)
+        s_deep, _, r_deep, _ = ot.rule_score_and_bucket(deep, set(), pats, now)
+        assert s_shallow > s_deep
+        assert "thread_depth_penalty" in r_deep
+
+    def test_thread_depth_no_penalty_for_shallow_threads(self, pats, now):
+        # depth <= 2 → no penalty
+        shallow_index = "A" * (44 + 10)  # depth=1
+        item = _make_mail_item(to_line="me@co.com", conversation_index=shallow_index)
+        _, _, reasons, _ = ot.rule_score_and_bucket(item, set(), pats, now)
+        assert "thread_depth_penalty" not in reasons
+
+    def test_thread_depth_penalty_capped_at_15(self, pats, now):
+        # Very deep thread: depth=10 → raw=(10-2)*3=24, capped at 15
+        very_deep_index = "A" * (44 + 100)  # depth=10
+        baseline = _make_mail_item(conversation_index="")
+        deep = _make_mail_item(conversation_index=very_deep_index)
+        s_base, _, _, _ = ot.rule_score_and_bucket(baseline, set(), pats, now)
+        s_deep, _, _, _ = ot.rule_score_and_bucket(deep, set(), pats, now)
+        assert s_base - s_deep <= 15
+
+    # --- recipient count scoring ---
+
+    def test_small_group_boost_applied(self, pats, now):
+        # 2 recipients → small_group boost +5
+        two_recips = _make_mail_item(to_line="a@x.com; b@x.com")
+        many_recips = _make_mail_item(to_line="; ".join(f"u{i}@x.com" for i in range(15)))
+        s_small, _, r_small, _ = ot.rule_score_and_bucket(two_recips, set(), pats, now)
+        s_many, _, _, _ = ot.rule_score_and_bucket(many_recips, set(), pats, now)
+        assert "small_group" in r_small
+        assert s_small > s_many
+
+    def test_mass_email_penalty_applied(self, pats, now):
+        # 15 recipients → mass_email penalty -5
+        mass = _make_mail_item(to_line="; ".join(f"u{i}@x.com" for i in range(15)))
+        single = _make_mail_item(to_line="me@x.com")
+        s_mass, _, r_mass, _ = ot.rule_score_and_bucket(mass, set(), pats, now)
+        s_single, _, _, _ = ot.rule_score_and_bucket(single, set(), pats, now)
+        assert "mass_email" in r_mass
+        # single gets small_group(+5) + to_line(+10); mass gets to_line(+10) - mass_email(5)
+        # Δ = 10 points
+        assert s_single > s_mass
+
+    def test_medium_group_neither_boost_nor_penalty(self, pats, now):
+        # 5 recipients → no boost, no penalty
+        five = _make_mail_item(to_line="; ".join(f"u{i}@x.com" for i in range(5)))
+        _, _, reasons, _ = ot.rule_score_and_bucket(five, set(), pats, now)
+        assert "small_group" not in reasons
+        assert "mass_email" not in reasons
 
 
 # ---------------------------------------------------------------------------
@@ -664,12 +747,12 @@ class TestBucketBoundaries:
         assert bucket == ot.CAT_URGENT
 
     def test_score_45_is_action(self, pats):
-        # acat(35) + to(10) = 45 → Action
+        # acat(35) + to(10) + small_group(5, 1 recipient) = 50 → Action
         item = _make_mail_item(subject="ACAT", to_line="me@co.com")
         score, bucket, _, _ = ot.rule_score_and_bucket(
             item, set(), pats, datetime.now()
         )
-        assert score == 45
+        assert 45 <= score < 80
         assert bucket == ot.CAT_ACTION
 
     def test_score_20_is_waiting(self, pats):

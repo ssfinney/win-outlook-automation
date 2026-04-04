@@ -79,6 +79,10 @@ LOG_FILE = DATA_DIR / "triage.log"
 # Max rows written per bucket tab in the Excel report.
 EXCEL_BUCKET_ROW_LIMIT = 75
 
+# Minimum model prediction confidence (0–1) required for the model to override
+# the rule-based bucket. Below this threshold the rule bucket wins.
+MODEL_CONFIDENCE_THRESHOLD = 0.60
+
 
 def validate_config() -> None:
     if not isinstance(DAYS_BACK, int) or DAYS_BACK <= 0 or DAYS_BACK > 90:
@@ -180,6 +184,7 @@ class ScoredMail:
     final_bucket: str
     reasons: str
     is_noise_hint: int
+    model_confidence: float
     action_status: str
 
 
@@ -385,6 +390,20 @@ def rule_score_and_bucket(
     except Exception as e:
         logger.debug(f"Unable to compute age penalty: {e}")
 
+    td = thread_depth(mail_item)
+    if td > 2:
+        thread_penalty = min(15, (td - 2) * 3)
+        score -= thread_penalty
+        reasons.append(f"thread_depth_penalty:{td}")
+
+    rc = recipient_count(to_line)
+    if 1 <= rc <= 3:
+        score += 5
+        reasons.append("small_group")
+    elif rc > 10:
+        score -= 5
+        reasons.append("mass_email")
+
     noise = is_noise(subject, sender_email, noise_pats)
     if noise:
         score -= 40
@@ -432,12 +451,17 @@ def load_model():
     return None
 
 
-def choose_final_bucket(rule_bucket: str, model_bucket: str, _rule_score: int) -> str:
+def choose_final_bucket(
+    rule_bucket: str,
+    model_bucket: str,
+    _rule_score: int,
+    model_confidence: float = 1.0,
+) -> str:
     if rule_bucket == CAT_URGENT:
         return CAT_URGENT
     if rule_bucket == CAT_NOISE:
         return CAT_NOISE
-    if model_bucket in TRIAGE_CATEGORIES:
+    if model_bucket in TRIAGE_CATEGORIES and model_confidence >= MODEL_CONFIDENCE_THRESHOLD:
         return model_bucket
     return rule_bucket
 
@@ -630,15 +654,23 @@ def main():
             )
 
             model_bucket = ""
+            model_confidence = 0.0
             if model is not None:
                 try:
                     df_features = pd.DataFrame([features])
                     model_bucket = str(model.predict(df_features)[0])
+                    if hasattr(model, "predict_proba"):
+                        proba = model.predict_proba(df_features)[0]
+                        model_confidence = float(max(proba))
+                    else:
+                        model_confidence = 1.0
                 except Exception as e:
                     errors += 1
                     logger.error(f"Model prediction error for {entry_id}: {e}")
 
-            final_bucket = choose_final_bucket(rule_bucket, model_bucket, rule_score)
+            final_bucket = choose_final_bucket(
+                rule_bucket, model_bucket, rule_score, model_confidence
+            )
             action_status = apply_actions(item, final_bucket, read_later)
 
             scored.append(
@@ -663,6 +695,7 @@ def main():
                     final_bucket=str(final_bucket),
                     reasons=str(reasons),
                     is_noise_hint=int(features["is_noise_hint"]),
+                    model_confidence=model_confidence,
                     action_status=action_status,
                 )
             )
