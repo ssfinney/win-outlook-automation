@@ -267,6 +267,7 @@ def sanity_check(records: List[Dict[str, Any]]) -> None:
 
 
 def main() -> None:
+    """Run export workflow from Outlook Sent Items to JSONL."""
     args = parse_args()
 
     exclude_recipients = load_exclude_recipients(args)
