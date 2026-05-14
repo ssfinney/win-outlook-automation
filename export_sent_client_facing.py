@@ -8,7 +8,7 @@ import datetime as dt
 import json
 import re
 from pathlib import Path
-from typing import Any, Dict, Iterable, List, Optional
+from typing import Any, Dict, List, Optional, Set
 
 try:
     import win32com.client  # type: ignore
@@ -55,6 +55,18 @@ def parse_args() -> argparse.Namespace:
         help="Output JSONL path",
     )
     parser.add_argument("--dry-run", action="store_true", help="Only print counts")
+    parser.add_argument(
+        "--exclude-email",
+        action="append",
+        default=[],
+        help="Recipient email to exclude (repeat flag for multiple).",
+    )
+    parser.add_argument(
+        "--exclude-file",
+        type=Path,
+        default=None,
+        help="Optional file with one email per line to exclude.",
+    )
     return parser.parse_args()
 
 
@@ -156,6 +168,40 @@ def strip_signature_and_fluff(body: str) -> str:
     return body
 
 
+
+def load_exclude_recipients(args: argparse.Namespace) -> Set[str]:
+    recipients = {
+        "ops@example.com",
+        "internal@example.com",
+    }
+    recipients.update((e or "").strip().lower() for e in args.exclude_email)
+    recipients.discard("")
+
+    if args.exclude_file:
+        try:
+            for line in args.exclude_file.read_text(encoding="utf-8").splitlines():
+                cleaned = line.strip().lower()
+                if cleaned and not cleaned.startswith("#"):
+                    recipients.add(cleaned)
+        except Exception as exc:
+            print(f"[WARN] Unable to read exclude file {args.exclude_file}: {exc}")
+
+    return recipients
+
+
+def is_underwriting_or_ops(subject: str, body: str) -> bool:
+    corpus = f"{subject}\n{body}".lower()
+    patterns = [
+        "underwriting",
+        "new business",
+        "requirements received",
+        "aps ordered",
+        "case status",
+        "policy service request",
+        "internal use only",
+    ]
+    return any(p in corpus for p in patterns)
+
 def normalize_body(body: str) -> str:
     body = body.replace("\r\n", "\n").replace("\r", "\n")
     body = strip_quoted_text(body)
@@ -221,10 +267,7 @@ def sanity_check(records: List[Dict[str, Any]]) -> None:
 def main() -> None:
     args = parse_args()
 
-    exclude_recipients = {
-        "ops@example.com",
-        "internal@example.com",
-    }
+    exclude_recipients = load_exclude_recipients(args)
 
     since_date = None
     if args.since:
@@ -269,13 +312,23 @@ def main() -> None:
             clean_body = normalize_body(raw_body)
             wc = word_count(clean_body)
 
+            if is_underwriting_or_ops(subject, clean_body):
+                counts["excluded_underwriting_patterns"] += 1
+                continue
+
             if is_signature_only(clean_body) or mostly_forwarded(subject, raw_body, clean_body):
                 counts["excluded_noise_rules"] += 1
                 continue
 
+            sent_iso = to_iso_utc(getattr(item, "SentOn", None))
+            if not sent_iso:
+                counts["errors"] += 1
+                print(f"[WARN] Missing/invalid SentOn at scan #{counts['total_scanned']}")
+                continue
+
             rec = {
                 "id": str(getattr(item, "EntryID", "") or ""),
-                "sent_utc": to_iso_utc(getattr(item, "SentOn", None)),
+                "sent_utc": sent_iso,
                 "to": to_list,
                 "cc": cc_list,
                 "subject": subject,
