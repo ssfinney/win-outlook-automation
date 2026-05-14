@@ -19,7 +19,7 @@ except ImportError as exc:  # pragma: no cover
 
 PR_SMTP_ADDRESS = "http://schemas.microsoft.com/mapi/proptag/0x39FE001E"
 REPLY_HEADER_LINE_RE = re.compile(
-    r"^(from:|sent:|to:|cc:|subject:)\\s*", re.IGNORECASE
+    r"^(from:|sent:|to:|cc:|subject:)\s*", re.IGNORECASE
 )
 ON_WROTE_RE = re.compile(
     r"^on\s+.+\s+wrote:\s*$", re.IGNORECASE
@@ -30,7 +30,7 @@ SIGNOFF_RE = re.compile(
     re.IGNORECASE,
 )
 MOBILE_FOOTER_RE = re.compile(
-    r"^sent from (my )?(iphone|ipad|android|yahoo mail|gmail|outlook|mobile)\\b",
+    r"^sent from (my )?(iphone|ipad|android|yahoo mail|gmail|outlook|mobile)\b",
     re.IGNORECASE,
 )
 FORWARDED_CONTENT_HINT_RE = re.compile(
@@ -277,12 +277,13 @@ def main() -> None:
     namespace = outlook.GetNamespace("MAPI")
     sent_folder = namespace.GetDefaultFolder(5)  # olFolderSentMail
     items = sent_folder.Items
-    items.Sort("[SentOn]", True)
 
     if since_date:
         start = dt.datetime.combine(since_date, dt.time.min)
-        filter_str = "[SentOn] >= '{}'".format(start.strftime("%m/%d/%Y %I:%M %p"))
+        filter_str = "[SentOn] >= #{}#".format(start.strftime("%m/%d/%Y %I:%M %p"))
         items = items.Restrict(filter_str)
+
+    items.Sort("[SentOn]", True)
 
     kept: List[Dict[str, Any]] = []
     counts = {
@@ -312,11 +313,16 @@ def main() -> None:
             clean_body = normalize_body(raw_body)
             wc = word_count(clean_body)
 
-            if is_underwriting_or_ops(subject, clean_body):
+            is_secure_message = "{secure message}" in subject.lower()
+
+            if not is_secure_message and is_underwriting_or_ops(subject, clean_body):
                 counts["excluded_underwriting_patterns"] += 1
                 continue
 
-            if is_signature_only(clean_body) or mostly_forwarded(subject, raw_body, clean_body):
+            if not is_secure_message and (
+                is_signature_only(clean_body)
+                or mostly_forwarded(subject, raw_body, clean_body)
+            ):
                 counts["excluded_noise_rules"] += 1
                 continue
 
